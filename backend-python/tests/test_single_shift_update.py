@@ -46,7 +46,7 @@ def test_editing_one_shift_never_changes_other_shift_times(tmp_path, monkeypatch
     rejected = TestClient(app).put(
         f"/api/workforce/shifts/{selected['id']}",
         headers={'Authorization': f"Bearer {sign_token({'id': user_id})}"},
-        json={'start_time': '01:00', 'end_time': '09:00', 'break_minutes': selected['break_minutes']},
+            json={'start_time': '01:00', 'end_time': '09:30', 'break_minutes': selected['break_minutes']},
     )
     assert rejected.status_code == 409
     assert 'gap or overlap' in rejected.json()['error']

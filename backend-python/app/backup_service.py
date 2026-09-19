@@ -47,7 +47,7 @@ def verify_backup(path,source_counts):
     return 'integrity=ok; foreign_keys=0; critical_counts=matched'
 
 def execute_month_end_backup(schedule=None,fail_for_test=False):
-    schedule=schedule or backup_schedule();cycle=schedule['cycle_id'];target=BACKUPS/f"procuraflow-month-end-{cycle}-{secrets.token_hex(4)}.db"
+    schedule=schedule or backup_schedule();cycle=schedule['cycle_id'];target=BACKUPS/f"procuraflo-month-end-{cycle}-{secrets.token_hex(4)}.db"
     with database.transaction(immediate=True)as c:
         row=c.execute('SELECT status FROM backup_cycles WHERE cycle_id=?',(cycle,)).fetchone()
         if row and row['status']in('RUNNING','COMPLETED'):return {'cycle_id':cycle,'status':row['status'],'duplicate_prevented':True}
@@ -67,7 +67,7 @@ def execute_month_end_backup(schedule=None,fail_for_test=False):
             c.execute("UPDATE backup_cycles SET status='COMPLETED',completed_at=datetime('now'),backup_reference=?,verification_result=?,updated_at=datetime('now') WHERE cycle_id=?",(target.name,verification,cycle))
             c.execute("INSERT INTO backup_restore_history(backup_reference,backup_type,database_included,attachments_included,configuration_included,backup_status,restore_tested,restore_test_date,restore_result,notes)VALUES(?,'AUTOMATIC_MONTH_END',1,0,1,'SUCCESS',1,datetime('now'),?,'Verified scheduled month-end SQLite backup')",(target.name,verification))
             c.execute("UPDATE system_maintenance SET active_yn=0,completed_at=datetime('now'),result='SUCCESS',updated_at=datetime('now') WHERE id=1")
-            notify(c,cycle,'BACKUP_COMPLETE','MONTH-END BACKUP COMPLETE — ProcuraFlow is available. Sign in again to resume work.','completed_at')
+            notify(c,cycle,'BACKUP_COMPLETE','MONTH-END BACKUP COMPLETE — Procuraflo is available. Sign in again to resume work.','completed_at')
             log_audit(c,'backup_cycles',None,'CREATE',None,after={'cycle_id':cycle,'event':'BACKUP_VERIFIED_AND_MAINTENANCE_ENDED','backup_reference':target.name,'verification':verification})
         return {'cycle_id':cycle,'status':'COMPLETED','backup_reference':target.name,'verification':verification}
     except Exception as error:
@@ -76,7 +76,7 @@ def execute_month_end_backup(schedule=None,fail_for_test=False):
         with database.transaction(immediate=True)as c:
             c.execute("UPDATE backup_cycles SET status='FAILED',completed_at=datetime('now'),error_message=?,verification_result='FAILED',updated_at=datetime('now') WHERE cycle_id=?",(str(error),cycle))
             c.execute("UPDATE system_maintenance SET active_yn=0,completed_at=datetime('now'),result='FAILED',updated_at=datetime('now') WHERE id=1")
-            notify(c,cycle,'BACKUP_FAILED','MONTH-END BACKUP FAILED — ProcuraFlow data remains protected by the last verified backup. Authorized management should review the status.','completed_at')
+            notify(c,cycle,'BACKUP_FAILED','MONTH-END BACKUP FAILED — Procuraflo data remains protected by the last verified backup. Authorized management should review the status.','completed_at')
             log_audit(c,'backup_cycles',None,'UPDATE',None,after={'cycle_id':cycle,'event':'BACKUP_FAILED_AND_MAINTENANCE_ENDED','error':str(error)})
         return {'cycle_id':cycle,'status':'FAILED','error':str(error)}
 

@@ -7,8 +7,8 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     proxy: {
-      '/api': process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000',
-      '/uploads': process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000',
+      '/api': process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8001',
+      '/uploads': process.env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8001',
     },
   },
 });

@@ -73,7 +73,7 @@ export default function EmployeePicker({
 
   return (
     <div>
-      <SearchSelect
+      <SearchSelect data-field={"value"}
         label={label}
         options={options}
         value={value}
@@ -113,7 +113,7 @@ export default function EmployeePicker({
               <label className="text-sm font-medium text-slate-700">
                 Employee ID *
               </label>
-              <input
+              <input data-field={"employee_code"}
                 className="input mt-1 w-full"
                 value={form.employee_code}
                 onChange={(event) =>
@@ -126,7 +126,7 @@ export default function EmployeePicker({
               <label className="text-sm font-medium text-slate-700">
                 Full name *
               </label>
-              <input
+              <input data-field={"name"}
                 className="input mt-1 w-full"
                 value={form.name}
                 onChange={(event) =>
@@ -135,7 +135,7 @@ export default function EmployeePicker({
               />
             </div>
             <div className="md:col-span-2">
-              <SearchSelect
+              <SearchSelect data-field={"department_id"}
                 label="Department *"
                 options={generalDepartments.map((department) => ({
                   value: department.id,
@@ -149,7 +149,7 @@ export default function EmployeePicker({
               />
             </div>
             {error && (
-              <div className="md:col-span-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <div data-error-message="true" role="alert" className="md:col-span-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {error}
               </div>
             )}

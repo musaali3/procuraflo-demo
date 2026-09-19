@@ -1,3 +1,4 @@
+from ..approval_routing import allows_self_approval
 from datetime import date
 from fastapi import APIRouter,Depends,HTTPException
 from ..audit import log_audit
@@ -14,8 +15,8 @@ def review(row_id:int,b:dict,u:dict=Depends(admin)):
 def approve(row_id:int,b:dict,u:dict=Depends(admin)):
     row=fetch_one('SELECT * FROM legacy_ledger_reconciliation WHERE id=?',(row_id,));
     if not row:raise HTTPException(404,'Warning not found')
-    if row.get('reviewed_by')==u['id']:raise HTTPException(409,'Reviewer cannot approve the same warning')
-    with transaction(immediate=True)as c:c.execute("UPDATE legacy_ledger_reconciliation SET approved_by=?,approved_at=datetime('now'),resolution_status=COALESCE(?,resolution_status),updated_at=datetime('now')WHERE id=?",(u['id'],b.get('resolution_status'),row_id));log_audit(c,'legacy_ledger_reconciliation',row_id,'APPROVE',u['id'],row,b)
+    if row.get('reviewed_by')==u['id'] and not allows_self_approval(u):raise HTTPException(409,'Reviewer cannot approve the same warning')
+    with transaction(immediate=True)as c:c.execute("UPDATE legacy_ledger_reconciliation SET approved_by=?,approved_at=datetime('now'),resolution_status=COALESCE(?,resolution_status),updated_at=datetime('now')WHERE id=?",(u['id'],b.get('resolution_status'),row_id));log_audit(c,'legacy_ledger_reconciliation',row_id,'APPROVE',u['id'],row,{**b,'self_approved':row.get('reviewed_by')==u['id']})
     return {'success':True}
 @router.get('/ledger-batches')
 def batches(_u:dict=Depends(admin)):return fetch_all('SELECT b.*,COUNT(i.id)warning_count FROM legacy_ledger_disposition_batches b LEFT JOIN legacy_ledger_batch_items i ON i.batch_id=b.id GROUP BY b.id ORDER BY b.id DESC')
@@ -89,9 +90,10 @@ def create_batch(b:dict,u:dict=Depends(admin)):
 def approve_batch(batch_id:int,u:dict=Depends(admin)):
     batch=fetch_one("SELECT * FROM legacy_ledger_disposition_batches WHERE id=?AND status='AWAITING APPROVAL'",(batch_id,));
     if not batch:raise HTTPException(404,'Pending batch not found')
-    if batch['reviewed_by']==u['id']:raise HTTPException(409,'Reviewer cannot approve the same batch')
+    if batch['reviewed_by']==u['id'] and not allows_self_approval(u):raise HTTPException(409,'Reviewer cannot approve the same batch')
     ids=[x['warning_id']for x in fetch_all('SELECT warning_id FROM legacy_ledger_batch_items WHERE batch_id=?',(batch_id,))]
     with transaction(immediate=True)as c:
         for wid in ids:c.execute("UPDATE legacy_ledger_reconciliation SET root_cause_classification=?,supporting_evidence=?,evidence_reference=?,management_decision=?,business_explanation=?,audit_reference=?,reviewed_by=?,reviewed_at=?,approved_by=?,approved_at=datetime('now'),resolution_status='RESOLVED',updated_at=datetime('now')WHERE id=?AND approved_by IS NULL",(batch['common_root_cause'],batch['common_evidence'],batch['evidence_reference'],batch['management_decision'],batch['business_explanation'],batch['audit_reference'],batch['reviewed_by'],batch['reviewed_at'],u['id'],wid))
         c.execute("UPDATE legacy_ledger_disposition_batches SET status='APPROVED',approved_by=?,approved_at=datetime('now')WHERE id=?",(u['id'],batch_id))
+        log_audit(c,'legacy_ledger_disposition_batches',batch_id,'APPROVE',u['id'],batch,{'self_approved':batch['reviewed_by']==u['id']})
     return {'success':True,'warning_count':len(ids)}

@@ -10,8 +10,8 @@ client = TestClient(app)
 def test_health():
     assert client.get('/api/health').json() == {
         'status': 'ok',
-        'system': 'ProcuraFlow',
-        'description': 'Precast Supply Chain Control System',
+        'system': 'Procuraflo',
+        'description': 'Supply Chain Control System',
     }
 
 def test_auth_contract():

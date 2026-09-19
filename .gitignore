@@ -8,6 +8,8 @@
 node_modules/
 dist/
 .vite/
+.eslintcache
+*.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -19,8 +21,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
 .venv/
 venv/
+*.egg-info/
 
 # Local databases and runtime files
 *.db
@@ -33,6 +38,7 @@ venv/
 backend-python/backups/
 backend-python/tenants/
 backend-python/uploads/
+backend-python/backend-uploads/
 backend/uploads/
 
 # Operating systems and editors
@@ -45,10 +51,23 @@ Thumbs.db
 
 # Test and coverage output
 .coverage
+.coverage.*
 htmlcov/
 coverage/
+coverage.xml
+junit.xml
+test-results/
+playwright-report/
+blob-report/
+
+# Generated UI, print, and document validation artifacts
+frontend-js/.validation/
 
 # Temporary files
 *.tmp
 *.temp
+*.bak
+*.orig
+*.rej
+*.pid
 ~$*

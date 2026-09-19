@@ -3,6 +3,11 @@ from fastapi import HTTPException
 from .database import fetch_one
 
 
+def allows_self_approval(user):
+    """SCM may approve their own work; other workflow controls still apply."""
+    return user.get('role') == 'SupplyChainManager'
+
+
 def employee_for_user(user):
     return fetch_one("""SELECT e.*,u.id user_id,u.role user_role FROM users u JOIN employees e ON e.id=u.employee_id
         WHERE u.id=? AND u.is_active=1 AND u.deleted_at IS NULL AND e.status='Active'
@@ -16,14 +21,14 @@ def material_issue_limit(employee_id, warehouse_id):
         AND (warehouse_id=? OR warehouse_id IS NULL)
         ORDER BY CASE WHEN warehouse_id=? THEN 0 ELSE 1 END, effective_from DESC,id DESC LIMIT 1""",
         (employee_id,warehouse_id,warehouse_id))
-    return float((row or{}).get('value_limit')or 0)
+    return float(row['value_limit'] or 0) if row else None
 
 
 def employee_limit(employee, document_type, warehouse_id=None):
     if not employee:return 0.0
     if document_type=='ISSUE':
         configured=material_issue_limit(employee['id'],warehouse_id)
-        if configured:return configured
+        if configured is not None:return configured
     return float(employee.get('approval_limit')or 0)
 
 
@@ -66,7 +71,7 @@ def approval_authorized(user,requester_user_id,value,document_type,warehouse_id=
     employee=employee_for_user(user)
     if not employee:raise HTTPException(403,'An active Supply Chain employee record is required')
     own_limit=employee_limit(employee,document_type,warehouse_id)
-    if user['role']=='SupplyChainManager':return employee,own_limit,'FINAL_AUTHORITY'
+    if allows_self_approval(user):return employee,own_limit,'SCM_SELF_APPROVAL' if requester_user_id==user['id'] else 'FINAL_AUTHORITY'
     if requester_user_id==user['id'] and value<=own_limit:return employee,own_limit,'SELF_WITHIN_ASSIGNED_LIMIT'
-    if pending and pending.get('approver_employee_id')==employee['id']:return employee,own_limit,'ROUTED_APPROVER'
+    if pending and pending.get('approver_employee_id')==employee['id'] and value<=own_limit:return employee,own_limit,'ROUTED_APPROVER'
     raise HTTPException(403,'This document is above your assigned limit or routed to another approver')

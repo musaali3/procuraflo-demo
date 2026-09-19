@@ -1,3 +1,4 @@
+import { ProductBrand } from './Branding';
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
@@ -143,6 +144,7 @@ const ITEM_ROLES = {
   "/employees/workforce-setup": ["SupplyChainManager"],
   "/employees/calendar-management": ["SupplyChainManager"],
   "/delegated-authority": ["SupplyChainManager"],
+  "/employees/clearance": ["SupplyChainManager"],
   "/procurement/pr": [
     "SupplyChainManager",
     "PurchaseManager",
@@ -174,7 +176,14 @@ const ITEM_ROLES = {
     "WarehouseSupervisor",
     "Storekeeper",
   ],
+  "/warehouse/receiving-control": ["SupplyChainManager","WarehouseManager","WarehouseSupervisor","Storekeeper"],
   "/warehouse/pr": [
+    "SupplyChainManager",
+    "WarehouseManager",
+    "WarehouseSupervisor",
+    "Storekeeper",
+  ],
+  "/warehouse/replenishment": [
     "SupplyChainManager",
     "WarehouseManager",
     "WarehouseSupervisor",
@@ -269,6 +278,7 @@ const ITEM_ROLES = {
 };
 const PATH_PERMISSION = {
   "/live-user-activity": "task.live_activity",
+  "/employees/clearance": "task.employees",
   "/masters/employees": "task.employees",
   "/masters/company-employees": "task.employees",
   "/masters/suppliers": "task.suppliers",
@@ -283,6 +293,8 @@ const PATH_PERMISSION = {
   "/procurement/po": "task.po",
   "/procurement/invoices": "task.invoices",
   "/warehouse/grn": "task.grn",
+  "/warehouse/replenishment": "task.pr",
+  "/warehouse/receiving-control": "task.grn",
   "/warehouse/issue": "task.material_issue",
   "/warehouse/returns": "task.returns",
   "/warehouse/transfers": "task.transfers",
@@ -328,6 +340,7 @@ const NAV_GROUPS = [
       },
       { to: "/employees/calendar-management", label: "Calendar Management" },
       { to: "/delegated-authority", label: "Delegated Authority" },
+      { to: "/employees/clearance", label: "Employee Clearance" },
       { to: "/reports?report=employee-workday", label: "Calendar Reports" },
     ],
   },
@@ -339,13 +352,16 @@ const NAV_GROUPS = [
       { to: "/procurement/po", label: "Purchase Orders" },
       { to: "/procurement/invoices", label: "Invoices & 3-Way Match" },
       { to: "/procurement/work-calendar", label: "Workday Calendar" },
+      { to: "/procurement/operating-schedule", label: "Operating Schedule" },
     ],
   },
   {
     label: "Warehouse",
     items: [
       { to: "/warehouse/pr", label: "Purchase Requisitions" },
+      { to: "/warehouse/replenishment", label: "Stock Replenishment Check" },
       { to: "/warehouse/grn", label: "Goods Receipt (GRN)" },
+      { to: "/warehouse/receiving-control", label: "Inspection & Put-Away" },
       { to: "/warehouse/issue", label: "Material Issue" },
       { to: "/warehouse/returns", label: "Returns" },
       { to: "/warehouse/transfers", label: "Transfers" },
@@ -374,7 +390,7 @@ const NAV_GROUPS = [
   },
   {
     label: "Reports",
-    items: [{ to: "/reports", label: "Reports" }],
+    items: [{ to: "/reports", label: "Reports" },{ to: "/reports/warehouse-deactivations", label: "Warehouse Deactivation Reports" }],
   },
   {
     label: "Help",
@@ -395,8 +411,11 @@ export default function Sidebar() {
   const { company } = useBranding();
   const { user } = useAuth();
   const { pathname, search } = useLocation();
-  const visibleGroups = user?.role ? ROLE_VISIBILITY[user.role] : [];
+  const visibleGroups = user?.role ? (ROLE_VISIBILITY[user.role] || []) : [];
+  const warehouseLogin = ["WarehouseManager", "WarehouseSupervisor", "Storekeeper"].includes(user?.role);
   const canSee = (to) => {
+    if(to === "/procurement/pr")return Boolean(user) && !warehouseLogin;
+    if(to === "/warehouse/pr" && warehouseLogin)return true;
     if (!user || !(ITEM_ROLES[to] || []).includes(user.role)) return false;
     const required = to === "/masters/items" ? undefined : PATH_PERMISSION[to];
     if (
@@ -435,14 +454,14 @@ export default function Sidebar() {
   }
   return _jsxs("aside", {
     className:
-      "app-sidebar w-64 bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-slate-300 h-screen sticky top-0 overflow-y-auto flex flex-col flex-shrink-0 shadow-2xl shadow-indigo-950/30",
+      "app-sidebar w-64 min-h-screen self-stretch bg-slate-950 text-slate-300 flex flex-col flex-shrink-0",
     children: [
       _jsx("div", {
         className: "px-5 py-5 border-b border-white/10",
         children: _jsx("div", {
           className:
-            "rounded-xl bg-white px-4 py-4 text-center text-lg font-bold text-slate-950 shadow-sm",
-          children: "ProcuraFlow",
+            "px-4 py-3 text-center text-lg font-bold text-white",
+          children: _jsx(ProductBrand, { compact: true, inverse: true }),
         }),
       }),
       _jsx("nav", {
@@ -463,13 +482,13 @@ export default function Sidebar() {
           return _jsxs(
             "div",
             {
-              className: `mb-1 px-2 rounded-xl transition-colors ${isOpen ? "bg-cyan-400/5" : ""}`,
+              className: "mb-1 px-2",
               children: [
                 _jsxs("button", {
                   type: "button",
                   onClick: () => toggleGroup(group.label),
                   "aria-expanded": isOpen,
-                  className: `sidebar-group-button flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider transition-colors ${isOpen ? "text-cyan-100 bg-gradient-to-r from-indigo-600/80 to-cyan-600/50 ring-1 ring-cyan-300/20 shadow-md shadow-indigo-950/30" : hasActiveItem ? "text-indigo-200 bg-indigo-500/10" : "text-slate-500 hover:bg-white/5 hover:text-slate-300"}`,
+                  className: `sidebar-group-button flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider transition-colors ${isOpen ? "text-cyan-200" : hasActiveItem ? "text-cyan-100" : "text-slate-400 hover:text-white"}`,
                   children: [
                     group.label,
                     _jsx("svg", {
@@ -503,7 +522,7 @@ export default function Sidebar() {
                               to: item.to,
                               end: item.to === "/",
                               className: ({ isActive }) =>
-                                `sidebar-link block rounded-md px-4 py-2 pl-6 text-sm transition-colors ${(item.to.includes("?") ? `${pathname}${search}` === item.to : isActive && !search) ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold border-l-4 border-cyan-200 shadow-sm" : "text-slate-300 border-l-4 border-transparent hover:bg-cyan-400/10 hover:border-cyan-500/50 hover:text-cyan-50"}`,
+                                `sidebar-link block rounded-lg px-4 py-2 pl-6 text-sm transition-colors ${(item.to.includes("?") ? `${pathname}${search}` === item.to : isActive && !search) ? "bg-gradient-to-r from-cyan-600 to-emerald-500 text-white font-semibold border-l-4 border-cyan-200 shadow-sm" : "text-slate-300 border-l-4 border-transparent hover:bg-cyan-400/10 hover:border-cyan-400/60 hover:text-white"}`,
                               children: item.label,
                             }),
                           ],
@@ -520,7 +539,7 @@ export default function Sidebar() {
       }),
       _jsxs("div", {
         className:
-          "sticky bottom-0 border-t border-white/10 bg-slate-950/90 p-4 backdrop-blur",
+          "mt-auto border-t border-white/10 bg-transparent p-4",
         children: [
           _jsx("div", {
             className:

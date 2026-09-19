@@ -12,6 +12,8 @@ def crud_router(prefix, table, allowed_fields, *, soft_delete=False, order_by='i
     @router.get('')
     def list_rows(_user: User):
         where = ' WHERE deleted_at IS NULL' if soft_delete else ''
+        if table=='items':
+            return fetch_all('SELECT i.*,COALESCE((SELECT SUM(quantity) FROM inventory_stock WHERE item_id=i.id),0) available_stock,COALESCE((SELECT SUM(quantity_remaining*unit_cost)/NULLIF(SUM(quantity_remaining),0) FROM inventory_layers WHERE item_id=i.id AND quantity_remaining>0),0) stock_unit_cost FROM items i'+where+f' ORDER BY {order_by}')
         return fetch_all(f'SELECT * FROM {table}{where} ORDER BY {order_by}')
 
     @router.get('/{row_id}')

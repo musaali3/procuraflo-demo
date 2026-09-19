@@ -1,3 +1,5 @@
+import { printControlledCopySet, COMPANY_COPY } from '../utils/printCopies';
+import { PRODUCT_BRAND } from '../config/brand';
 import {
   jsx as _jsx,
   jsxs as _jsxs,
@@ -12,14 +14,31 @@ import StatusBadge from "../components/StatusBadge";
 import { downloadElementPdf } from "../utils/downloadPdf";
 import { CompanyLogo } from "../components/Branding";
 import { brandedSpreadsheetHtml } from "../utils/brandedSpreadsheet";
+import useAutoRefresh from "../hooks/useAutoRefresh";
+import WorkforceSetupPage from "./WorkforceSetupPage";
+const scheduleHours = row => row.closed_periods?.length ? workingHours(row) || "Closed" : `${row.override_start_time || row.shift_start || "-"} - ${row.override_end_time || row.shift_end || "-"}`;
+const workingHours = row => (row.working_intervals || []).map(interval => `${interval.start.slice(11)}-${interval.end.slice(11)}`).join(", ");
 const shiftTone = {
   MORNING: "bg-amber-50 text-amber-800 border-amber-200",
   AFTERNOON: "bg-sky-50 text-sky-800 border-sky-200",
-  EVENING: "bg-violet-50 text-violet-800 border-violet-200",
+  EVENING: "bg-cyan-50 text-cyan-800 border-cyan-200",
   OFF: "bg-slate-100 text-slate-700 border-slate-200",
   HOLIDAY: "bg-rose-50 text-rose-800 border-rose-200",
 };
-export default function WorkCalendarPage({ scope, admin = false }) {
+export default function WorkCalendarPage(props) {
+  const { user } = useAuth();
+  const [section, setSection] = useState("calendar");
+  if (!props.admin || user?.role !== "SupplyChainManager") return _jsx(WorkCalendarView, { ...props });
+  return _jsxs("div", { children: [
+    _jsx("div", { className: "mb-4 flex flex-wrap gap-2", role: "tablist", "aria-label": "Calendar Management", children: ["calendar", "holidays"].map(value => _jsx("button", {
+      type: "button", role: "tab", "aria-selected": section === value,
+      className: section === value ? "btn-primary" : "btn-secondary",
+      onClick: () => setSection(value), children: value === "calendar" ? "Work Calendar" : "Holidays",
+    }, value)) }),
+    section === "holidays" ? _jsx(WorkforceSetupPage, { section: "holidays" }) : _jsx(WorkCalendarView, { ...props }),
+  ] });
+}
+function WorkCalendarView({ scope, admin = false }) {
   const { user } = useAuth(),
     { company } = useBranding();
   const canAdjustCalendar = admin && user?.role === "SupplyChainManager";
@@ -63,6 +82,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
       .catch((e) =>
         setError(e.response?.data?.error || "Unable to load workday calendar"),
       );
+  useAutoRefresh(load);
   useEffect(() => {
     if (effectiveScope === "Procurement" && warehouseId) setWarehouseId("");
     load();
@@ -137,7 +157,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
   async function print() {
     await audit("PRINT", "PDF");
     await prepareCalendarOutput();
-    window.print();
+    await printControlledCopySet('work-calendar-print', [COMPANY_COPY], {orientation:'landscape'});
   }
   async function pdf() {
     await audit("DOWNLOAD", "PDF");
@@ -165,7 +185,13 @@ export default function WorkCalendarPage({ scope, admin = false }) {
       "shift_label",
       "shift_start",
       "shift_end",
+      "working_minutes",
+      "work_periods_json",
       "day_type",
+      "operating_status",
+      "display_label",
+      "holiday_name",
+      "remarks",
       "availability_status",
       "reports_to_name",
       "status",
@@ -174,8 +200,8 @@ export default function WorkCalendarPage({ scope, admin = false }) {
     const blob = new Blob(
       [
         [
-          keys.join(","),
-          ...data.rows.map((r) => keys.map((k) => esc(r[k])).join(",")),
+          [...keys, "generated_by"].join(","),
+          ...data.rows.map((r) => [...keys.map((k) => esc(r[k])), esc(PRODUCT_BRAND.name)].join(",")),
         ].join("\r\n"),
       ],
       { type: "text/csv" },
@@ -183,7 +209,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
     const url = URL.createObjectURL(blob),
       a = document.createElement("a");
     a.href = url;
-    a.download = `${effectiveScope}-calendar-${data.range.from}.csv`;
+    a.download = `Procuraflo-${effectiveScope}-calendar-${data.range.from}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -255,7 +281,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
         className: "card mb-4 flex flex-wrap gap-2 p-3 print:hidden",
         children: [
           admin &&
-            _jsxs("select", {
+            _jsxs("select", {"data-field": "adminScope", 
               className: "input max-w-48",
               value: adminScope,
               onChange: (e) => {
@@ -269,7 +295,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
             }),
           effectiveScope === "Warehouse" &&
             data.warehouses?.length > 0 &&
-            _jsxs("select", {
+            _jsxs("select", {"data-field": "warehouseId", 
               className: "input max-w-64",
               value: warehouseId,
               onChange: (e) => setWarehouseId(e.target.value),
@@ -338,7 +364,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
         ],
       }),
       error &&
-        _jsx("div", {
+        _jsx("div", {"data-error-message": true, role: "alert", 
           className: "mb-3 rounded bg-rose-50 p-3 text-rose-700",
           children: error,
         }),
@@ -381,11 +407,11 @@ export default function WorkCalendarPage({ scope, admin = false }) {
       _jsxs("article", {
         id: "work-calendar-print",
         className:
-          "controlled-print-document rounded-xl border border-slate-200 bg-white p-5",
+          "work-calendar-document controlled-print-document rounded-xl border border-slate-200 bg-white p-5",
         children: [
           _jsxs("header", {
             className:
-              "mb-5 flex items-center justify-between border-b border-indigo-100 pb-4",
+              "mb-5 flex items-center justify-between border-b border-blue-100 pb-4",
             children: [
               _jsxs("div", {
                 className: "flex items-center gap-4",
@@ -399,8 +425,8 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                       }),
                       _jsx("div", {
                         className:
-                          "text-xs font-semibold uppercase tracking-[.2em] text-indigo-600",
-                        children: "ProcuraFlow",
+                          "text-xs font-semibold uppercase tracking-[.2em] text-blue-600",
+                        children: "Procuraflo",
                       }),
                       _jsxs("h2", {
                         className: "mt-1 text-lg font-semibold",
@@ -458,8 +484,8 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                       const counts = (code) =>
                         day.rows.filter((r) =>
                           code === "OFF"
-                            ? r.day_type === "OFF"
-                            : (r.shift_code === code || r.shift_code?.endsWith(`-${code}`) || r.shift_code?.endsWith(`-SHIFT-${code === "MORNING" ? 1 : code === "AFTERNOON" ? 2 : 3}`)) && r.day_type !== "OFF",
+                            ? !["WORKDAY", "HOLIDAY_WORKING"].includes(r.day_type)
+                            : (r.shift_code === code || r.shift_code?.endsWith(`-${code}`) || r.shift_code?.endsWith(`-SHIFT-${code === "MORNING" ? 1 : code === "AFTERNOON" ? 2 : 3}`)) && ["WORKDAY", "HOLIDAY_WORKING"].includes(r.day_type),
                         ).length;
                       return _jsxs(
                         "button",
@@ -468,7 +494,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                           onClick: () => setDetailDate(day.date),
                           onDoubleClick: () => setDetailDate(day.date),
                           title: "Click to open the complete daily employee and shift roster.",
-                          className: "calendar-date-card print-avoid-break rounded-xl border border-slate-200 p-2.5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-300",
+                          className: "calendar-date-card print-avoid-break rounded-xl border border-slate-200 p-2.5 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-300",
                           children: [
                             _jsxs("div", {
                               className:
@@ -526,17 +552,17 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                                     _jsxs(
                                       "div",
                                       {
-                                        className: `calendar-card-employee ${rowIndex >= 3 ? "calendar-card-overflow hidden" : "grid"} grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md border border-slate-100 bg-white/80 px-2 py-1 text-[11px] ${user?.full_name === r.employee_name ? "font-bold text-indigo-700" : "text-slate-600"}`,
+                                        className: `calendar-card-employee ${rowIndex >= 3 ? "calendar-card-overflow hidden" : "grid"} grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md border border-slate-100 bg-white/80 px-2 py-1 text-[11px] ${user?.full_name === r.employee_name ? "font-bold text-blue-700" : "text-slate-600"}`,
                                         children: [
                                           _jsxs("span", { className: "min-w-0", children: [_jsx("span", { className: "block truncate font-semibold", children: r.employee_name }), _jsxs("span", { className: "block truncate text-[9px] text-slate-400", children: [r.employee_code, " · ", String(r.role_code || "").replace(/([a-z])([A-Z])/g, "$1 $2")] })] }),
-                                          _jsxs("span", { className: "text-right", children: [_jsx("span", { className: "block font-semibold", children: r.shift_code || r.day_type }), _jsxs("span", { className: "block whitespace-nowrap text-[9px] text-slate-400", children: [r.override_start_time || r.shift_start || "—", "–", r.override_end_time || r.shift_end || "—"] })] }),
+                                          _jsxs("span", { className: "text-right", children: [_jsx("span", { className: "block font-semibold", children: r.display_label || r.shift_code || r.day_type }), _jsxs("span", { className: "block whitespace-nowrap text-[9px] text-slate-400", children: ["WORKDAY", "HOLIDAY_WORKING"].includes(r.day_type) ? [scheduleHours(r), ...(r.closed_breaks || []).map(period => _jsx("span", { className: "block text-amber-700", children: `Break ${period.start.slice(11)}-${period.end.slice(11)}` }, period.start))] : [r.operating_status !== r.display_label ? r.operating_status : "", r.holiday_notes ? ` ${r.holiday_notes}` : ""] })] }),
                                         ],
                                       },
                                       r.id,
                                     ),
                                   ),
                                 !day.rows.length && _jsx("div", { className: "rounded bg-slate-50 px-2 py-3 text-center text-[10px] text-slate-400", children: "No employees scheduled" }),
-                                day.rows.length > 3 && _jsxs("div", { className: "calendar-screen-only rounded-md bg-indigo-50 px-2 py-1 text-center text-[10px] font-semibold text-indigo-700", children: ["+", day.rows.length - 3, " more · click for details"] }),
+                                day.rows.length > 3 && _jsxs("div", { className: "calendar-screen-only rounded-md bg-blue-50 px-2 py-1 text-center text-[10px] font-semibold text-blue-700", children: ["+", day.rows.length - 3, " more · click for details"] }),
                               ],
                             }),
                           ],
@@ -559,15 +585,11 @@ export default function WorkCalendarPage({ scope, admin = false }) {
             children: [
               _jsxs("span", {
                 children: [
-                  "Generated by ProcuraFlow \u00B7 Generated By: ",
+                  "Generated By: ",
                   user?.full_name,
                   " \u00B7 Generated On: ",
                   new Date().toLocaleString(),
                 ],
-              }),
-              _jsx("span", {
-                className: "print-page-number",
-                children: "Page",
               }),
             ],
           }),
@@ -586,12 +608,12 @@ export default function WorkCalendarPage({ scope, admin = false }) {
             children: [
               _jsxs("div", {
                 className:
-                  "flex items-center justify-between border-b border-indigo-100 bg-gradient-to-r from-indigo-50 to-sky-50 px-5 py-4",
+                  "flex items-center justify-between border-b border-blue-100 bg-gradient-to-r from-blue-50 to-sky-50 px-5 py-4",
                 children: [
                   _jsxs("div", {
                     children: [
                       _jsx("h2", {
-                        className: "text-lg font-bold text-indigo-950",
+                        className: "text-lg font-bold text-blue-950",
                         children: "Daily Employee Shift Roster",
                       }),
                       _jsx("p", {
@@ -650,7 +672,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                 className: "block text-sm",
                 children: [
                   "Work Status",
-                  _jsx("select", {
+                  _jsx("select", {"data-field": "day_type", 
                     className: "input mt-1",
                     value: editing.day_type,
                     onChange: (e) =>
@@ -668,7 +690,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                 className: "block text-sm",
                 children: [
                   "Shift",
-                  _jsxs("select", {
+                  _jsxs("select", {"data-field": "shift_id", 
                     className: "input mt-1",
                     value: editing.shift_id || "",
                     onChange: (e) =>
@@ -699,7 +721,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                     className: "text-sm",
                     children: [
                       "Override Start",
-                      _jsx("input", {
+                      _jsx("input", {"data-field": "override_start_time", 
                         type: "time",
                         className: "input mt-1",
                         value: editing.override_start_time || "",
@@ -715,7 +737,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                     className: "text-sm",
                     children: [
                       "Override End",
-                      _jsx("input", {
+                      _jsx("input", {"data-field": "override_end_time", 
                         type: "time",
                         className: "input mt-1",
                         value: editing.override_end_time || "",
@@ -733,7 +755,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                 className: "block text-sm",
                 children: [
                   "Mandatory Reason",
-                  _jsx("input", {
+                  _jsx("input", {"data-field": "reason", 
                     className: "input mt-1",
                     value: editing.reason,
                     onChange: (e) =>
@@ -745,7 +767,7 @@ export default function WorkCalendarPage({ scope, admin = false }) {
                 className: "block text-sm",
                 children: [
                   "Remarks",
-                  _jsx("textarea", {
+                  _jsx("textarea", {"data-field": "remarks", 
                     className: "input mt-1",
                     value: editing.remarks || "",
                     onChange: (e) =>
@@ -821,7 +843,7 @@ function Roster({ rows, admin, user, adjust }) {
             _jsxs(_Fragment, {
               children: [
                 _jsx("tr", {
-                  className: "roster-date-group border-y border-indigo-200 bg-gradient-to-r from-indigo-50 to-sky-50",
+                  className: "roster-date-group border-y border-blue-200 bg-gradient-to-r from-blue-50 to-sky-50",
                   children: _jsx("td", {
                     colSpan: canAdjustCalendar ? 11 : 10,
                     className: "px-3 py-2",
@@ -831,13 +853,13 @@ function Roster({ rows, admin, user, adjust }) {
                         _jsxs("div", {
                           children: [
                             _jsx("strong", {
-                              className: "text-sm text-indigo-950",
+                              className: "text-sm text-blue-950",
                               children: date === "Unscheduled" ? date : new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", day: "2-digit", month: "long", year: "numeric" }),
                             }),
                             _jsxs("span", { className: "ml-2 text-xs text-slate-500", children: ["· ", dateRows.length, " employee", dateRows.length === 1 ? "" : "s"] }),
                           ],
                         }),
-                        _jsx("span", { className: "rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-indigo-700 shadow-sm", children: date }),
+                        _jsx("span", { className: "rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-blue-700 shadow-sm", children: date }),
                       ],
                     }),
                   }),
@@ -882,20 +904,20 @@ function Roster({ rows, admin, user, adjust }) {
                         })
                       : "—",
                   }),
-                  _jsx("td", { children: r.shift_label || "—" }),
+                  _jsx("td", { children: r.display_label || r.shift_label || "—" }),
                   _jsxs("td", {
-                    children: [
-                      r.override_start_time || r.shift_start || "—",
-                      " \u2014 ",
-                      r.override_end_time || r.shift_end || "—",
-                    ],
+                    children: ["WORKDAY", "HOLIDAY_WORKING"].includes(r.day_type) ? [
+                      scheduleHours(r),
+                      r.working_minutes != null && _jsx("div", { className: "text-xs text-slate-600", children: `${(r.working_minutes / 60).toFixed(2)} working hours` }),
+                      (r.closed_breaks || []).map(period => _jsx("div", { className: "text-xs text-amber-700", children: `Closed / break: ${period.start.slice(11)}-${period.end.slice(11)}` }, period.start)),
+                    ] : [r.operating_status || "Off Day / Closed", _jsx("div", { className: "text-xs text-slate-500", children: r.holiday_notes || r.remarks || "" })],
                   }),
                   _jsxs("td", {
                     children: [
-                      _jsx("div", { children: r.day_type }),
+                      _jsx("div", { children: r.operating_status || r.day_type }),
                       _jsx("div", {
                         className: "text-[10px] text-slate-500",
-                        children: r.availability_status || "Available",
+                        children: r.closed_periods?.length ? r.closed_periods.map(period => `Closed ${period.start.slice(11)}-${period.end.slice(11)}: ${period.reason}`).join("; ") : r.availability_status || "Available",
                       }),
                     ],
                   }),

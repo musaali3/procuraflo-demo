@@ -24,7 +24,7 @@ export default function GeneralEmployeesPage() {
       description="Maintain non-procurement and non-warehouse personnel for requisitions, receipts, tools, and reporting."
       endpoint="/masters/general-employees"
       columns={[
-        { key: "employee_code", label: "Employee ID" },
+        { key: "employee_code", label: "Employee ID (generated automatically)", readOnly: true },
         { key: "name", label: "Employee Name" },
         { key: "department_name", label: "Department" },
         { key: "position", label: "Position" },
@@ -41,7 +41,7 @@ export default function GeneralEmployeesPage() {
             label: department.name,
           })),
         },
-        { key: "employee_code", label: "Employee ID" },
+        { key: "employee_code", label: "Employee ID (generated automatically)", readOnly: true },
         { key: "name", label: "Full Name" },
         { key: "position", label: "Position / Job Title" },
         { key: "payroll_number", label: "Payroll Number" },

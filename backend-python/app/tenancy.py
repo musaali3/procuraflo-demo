@@ -26,7 +26,7 @@ def ensure_registry():
         c.execute('''CREATE TABLE IF NOT EXISTS tenants(
           tenant_key TEXT PRIMARY KEY,company_name TEXT NOT NULL COLLATE NOCASE UNIQUE,database_path TEXT NOT NULL UNIQUE,
           status TEXT NOT NULL DEFAULT 'Active',created_at TEXT NOT NULL DEFAULT(datetime('now')))''')
-        c.execute("INSERT OR IGNORE INTO tenants(tenant_key,company_name,database_path)VALUES('default','Existing ProcuraFlow Company',?)",(str(database.DB_PATH),))
+        c.execute("INSERT OR IGNORE INTO tenants(tenant_key,company_name,database_path)VALUES('default','Existing Procuraflo Company',?)",(str(database.DB_PATH),))
 
 
 def allow_multiple_companies() -> bool:
@@ -51,7 +51,7 @@ def company_registration_status() -> dict:
 
 
 def tenant_record(key: str):
-    if str(key or'').lower()=='default':return {'tenant_key':'default','company_name':'Existing ProcuraFlow Company','database_path':str(database.DB_PATH),'status':'Active'}
+    if str(key or'').lower()=='default':return {'tenant_key':'default','company_name':'Existing Procuraflo Company','database_path':str(database.DB_PATH),'status':'Active'}
     ensure_registry()
     with sqlite3.connect(REGISTRY_PATH)as c:
         c.row_factory=sqlite3.Row;row=c.execute("SELECT * FROM tenants WHERE tenant_key=? AND status='Active'",(str(key or'').lower(),)).fetchone()
@@ -117,3 +117,15 @@ def register_tenant(key: str, company_name: str, target: Path):
         if not allow_multiple_companies() and c.execute("SELECT 1 FROM tenants WHERE tenant_key<>'default' AND status='Active' LIMIT 1").fetchone():
             raise FileExistsError('Company registration is closed for this installation')
         c.execute('INSERT INTO tenants(tenant_key,company_name,database_path)VALUES(?,?,?)',(key,company_name,str(target)))
+
+
+def migrate_registered_tenants() -> None:
+    """Apply idempotent compatibility migrations inside every tenant boundary."""
+    ensure_registry()
+    with sqlite3.connect(REGISTRY_PATH) as registry:
+        paths=[Path(row[0]).resolve() for row in registry.execute("SELECT database_path FROM tenants WHERE status='Active'")]
+    for path in paths:
+        if not path.is_file() or path==database.DB_PATH:continue
+        token=database.use_database(path)
+        try:database.ensure_company_employee_schema()
+        finally:database.reset_database(token)

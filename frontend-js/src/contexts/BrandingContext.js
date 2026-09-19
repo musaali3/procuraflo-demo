@@ -1,5 +1,5 @@
 import { jsx as _jsx } from "react/jsx-runtime";
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useState } from 'react';
 import client from '../api/client';
 import { PRODUCT_BRAND } from '../config/brand';
 import { setStoredCurrency } from '../utils/currency';
@@ -16,7 +16,6 @@ export function BrandingProvider({ children }) {
     catch {
         document.title = `${PRODUCT_BRAND.name} | Supply Chain Management`;
     } }, []);
-    useEffect(() => { refresh(); }, []);
     return _jsx(BrandingContext.Provider, { value: { company, product: PRODUCT_BRAND, refresh }, children: children });
 }
 export const useBranding = () => useContext(BrandingContext);

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sqlite3
@@ -24,11 +25,11 @@ def initialize_database() -> None:
                 return
             if tables:
                 raise RuntimeError(
-                    f'Database at {DB_PATH} has an incomplete schema; restore it from backup before starting ProcuraFlow'
+                    f'Database at {DB_PATH} has an incomplete schema; restore it from backup before starting Procuraflo'
                 )
         DB_PATH.unlink()
     if not BOOTSTRAP_DB.is_file():
-        raise RuntimeError(f'ProcuraFlow bootstrap database is missing: {BOOTSTRAP_DB}')
+        raise RuntimeError(f'Procuraflo bootstrap database is missing: {BOOTSTRAP_DB}')
     shutil.copy2(BOOTSTRAP_DB, DB_PATH)
 
 
@@ -86,10 +87,205 @@ def company_base_currency(default: str = 'SAR') -> str:
     ) or {}
     return str(row.get('value') or default).strip().upper()
 
+def _widen_location_type_constraint() -> None:
+    """Replace the legacy indoor-only CHECK while preserving location IDs and references."""
+    path=active_db_path()
+    with sqlite3.connect(path) as connection:
+        sql=(connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='locations'").fetchone()or[None])[0]
+        legacy="CHECK(type IN ('Zone','Aisle','Rack','Shelf','Bin'))"
+        if not sql or legacy not in sql:return
+        allowed="CHECK(type IN ('Zone','Aisle','Rack','Shelf','Bin','Bay','Yard Slot','Ground Stack','Open Area','Staging'))"
+        replacement=sql.replace('CREATE TABLE locations','CREATE TABLE locations__type_migration',1).replace(legacy,allowed)
+        columns=[row[1]for row in connection.execute('PRAGMA table_info(locations)')]
+        names=','.join(f'"{name}"'for name in columns)
+        connection.execute('PRAGMA foreign_keys=OFF')
+        connection.execute('PRAGMA legacy_alter_table=ON')
+        connection.execute('BEGIN IMMEDIATE')
+        try:
+            connection.execute(replacement)
+            connection.execute(f'INSERT INTO locations__type_migration({names}) SELECT {names} FROM locations')
+            connection.execute('DROP TABLE locations')
+            connection.execute('ALTER TABLE locations__type_migration RENAME TO locations')
+            connection.commit()
+        except Exception:
+            connection.rollback();raise
+
+def _widen_quarantine_status_constraint() -> None:
+    path=active_db_path()
+    with sqlite3.connect(path) as connection:
+        sql=(connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='inventory_quarantine'").fetchone()or[None])[0]
+        legacy="CHECK(inventory_status IN('DAMAGED','REPAIR_PENDING','INSPECTION_PENDING','REJECTED'))"
+        if not sql or legacy not in sql:return
+        replacement=sql.replace('CREATE TABLE inventory_quarantine','CREATE TABLE inventory_quarantine__status_migration',1).replace(legacy,"CHECK(inventory_status IN('DAMAGED','REPAIR_PENDING','INSPECTION_PENDING','PUT_AWAY_PENDING','REJECTED'))")
+        columns=[row[1]for row in connection.execute('PRAGMA table_info(inventory_quarantine)')];names=','.join(f'"{name}"'for name in columns)
+        connection.execute('PRAGMA foreign_keys=OFF');connection.execute('PRAGMA legacy_alter_table=ON');connection.execute('BEGIN IMMEDIATE')
+        try:
+            connection.execute(replacement);connection.execute(f'INSERT INTO inventory_quarantine__status_migration({names}) SELECT {names} FROM inventory_quarantine');connection.execute('DROP TABLE inventory_quarantine');connection.execute('ALTER TABLE inventory_quarantine__status_migration RENAME TO inventory_quarantine');connection.commit()
+        except Exception:connection.rollback();raise
+
+
+def _allow_multiple_transfer_receipts():
+    """Preserve existing receipt IDs while allowing later partial receipts."""
+    connection=sqlite3.connect(active_db_path(),timeout=30)
+    try:
+        definition=connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transfer_receipts'").fetchone()
+        if not definition or 'transfer_id INTEGER UNIQUE' not in definition[0]:return
+        connection.execute('PRAGMA foreign_keys=OFF')
+        connection.execute('BEGIN IMMEDIATE')
+        try:
+            connection.execute('''CREATE TABLE transfer_receipts__multi(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,receipt_number TEXT UNIQUE NOT NULL,
+                transfer_id INTEGER NOT NULL REFERENCES transfers(id),
+                warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+                location_id INTEGER NOT NULL REFERENCES locations(id),
+                item_id INTEGER NOT NULL REFERENCES items(id),
+                quantity_received REAL NOT NULL CHECK(quantity_received>0),receiving_note TEXT,
+                received_by INTEGER NOT NULL REFERENCES users(id),received_at TEXT NOT NULL DEFAULT(datetime('now')),
+                physical_quantity REAL NOT NULL DEFAULT 0,good_quantity REAL NOT NULL DEFAULT 0,
+                damaged_quantity REAL NOT NULL DEFAULT 0,rejected_quantity REAL NOT NULL DEFAULT 0,
+                shortage_quantity REAL NOT NULL DEFAULT 0,unit_cost REAL NOT NULL DEFAULT 0,
+                total_value REAL NOT NULL DEFAULT 0,receipt_status TEXT,remarks TEXT)''')
+            old_columns={row[1] for row in connection.execute('PRAGMA table_info(transfer_receipts)')}
+            new_columns={row[1] for row in connection.execute('PRAGMA table_info(transfer_receipts__multi)')}
+            shared=[column for column in new_columns if column in old_columns]
+            names=','.join(shared)
+            connection.execute(f'INSERT INTO transfer_receipts__multi({names}) SELECT {names} FROM transfer_receipts')
+            connection.execute('DROP TABLE transfer_receipts')
+            connection.execute('ALTER TABLE transfer_receipts__multi RENAME TO transfer_receipts')
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.execute('PRAGMA foreign_keys=ON')
+        errors=connection.execute('PRAGMA foreign_key_check').fetchall()
+        if errors:raise RuntimeError('Transfer receipt migration found broken foreign-key references')
+    finally:
+        connection.close()
+
+def _allow_unassigned_transfer_destination_bins():
+    """Keep existing transfer lines while allowing receipt staff to choose the bin."""
+    connection=sqlite3.connect(active_db_path(),timeout=30)
+    try:
+        columns=connection.execute('PRAGMA table_info(transfer_items)').fetchall()
+        if not columns or not next(column[3] for column in columns if column[1]=='to_location_id'):return
+        definition=connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='transfer_items'").fetchone()[0]
+        replacement=definition.replace('CREATE TABLE transfer_items(', 'CREATE TABLE transfer_items__receiving_bin(').replace('CREATE TABLE IF NOT EXISTS transfer_items(', 'CREATE TABLE transfer_items__receiving_bin(').replace('to_location_id INTEGER NOT NULL REFERENCES locations(id)','to_location_id INTEGER REFERENCES locations(id)')
+        names=','.join(column[1] for column in columns)
+        connection.execute('PRAGMA foreign_keys=OFF')
+        connection.execute('BEGIN IMMEDIATE')
+        try:
+            connection.execute(replacement)
+            connection.execute(f'INSERT INTO transfer_items__receiving_bin({names}) SELECT {names} FROM transfer_items')
+            connection.execute('DROP TABLE transfer_items')
+            connection.execute('ALTER TABLE transfer_items__receiving_bin RENAME TO transfer_items')
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.execute('PRAGMA foreign_keys=ON')
+        if connection.execute('PRAGMA foreign_key_check').fetchall():
+            raise RuntimeError('Transfer item migration found broken foreign-key references')
+    finally:
+        connection.close()
+
+def _allow_transfer_goods_inspections():
+    """Existing GRN inspections remain intact; transfer receipts need no GRN link."""
+    connection=sqlite3.connect(active_db_path(),timeout=30)
+    try:
+        columns=connection.execute('PRAGMA table_info(goods_inspections)').fetchall()
+        if not columns or not any(column[1] in ('grn_id','grn_item_id') and column[3] for column in columns):return
+        definition=connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='goods_inspections'").fetchone()[0]
+        replacement=definition.replace('CREATE TABLE goods_inspections(', 'CREATE TABLE goods_inspections__transfer_receipts(').replace('CREATE TABLE IF NOT EXISTS goods_inspections(', 'CREATE TABLE goods_inspections__transfer_receipts(')
+        for column in ('grn_id','grn_item_id'):
+            replacement=replacement.replace(f'{column} INTEGER NOT NULL REFERENCES',f'{column} INTEGER REFERENCES')
+        names=','.join(column[1] for column in columns)
+        connection.execute('PRAGMA foreign_keys=OFF')
+        connection.execute('BEGIN IMMEDIATE')
+        try:
+            connection.execute(replacement)
+            connection.execute(f'INSERT INTO goods_inspections__transfer_receipts({names}) SELECT {names} FROM goods_inspections')
+            connection.execute('DROP TABLE goods_inspections')
+            connection.execute('ALTER TABLE goods_inspections__transfer_receipts RENAME TO goods_inspections')
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.execute('PRAGMA foreign_keys=ON')
+        if connection.execute('PRAGMA foreign_key_check').fetchall():
+            raise RuntimeError('Inspection migration found broken foreign-key references')
+    finally:
+        connection.close()
 
 def ensure_company_employee_schema():
     """Apply small, idempotent compatibility changes to existing installations."""
+    _widen_location_type_constraint()
+    _widen_quarantine_status_constraint()
+    _allow_multiple_transfer_receipts()
+    _allow_unassigned_transfer_destination_bins()
+    _allow_transfer_goods_inspections()
     with transaction(immediate=True) as connection:
+        for column,definition in {'source_warehouse_id':'INTEGER REFERENCES warehouses(id)','stock_quantity_snapshot':'REAL','min_stock_snapshot':'REAL','target_stock_snapshot':'REAL','auto_replenishment':'INTEGER NOT NULL DEFAULT 0'}.items():
+            if column not in {row['name']for row in connection.execute('PRAGMA table_info(pr_items)')}:connection.execute(f'ALTER TABLE pr_items ADD COLUMN {column} {definition}')
+        pr_item_columns={row['name']for row in connection.execute('PRAGMA table_info(pr_items)')}
+        for column,definition in {'recommended_base_quantity':'REAL','quantity_variance':'REAL NOT NULL DEFAULT 0','adjustment_reason':'TEXT','adjustment_note':'TEXT','adjusted_by':'INTEGER REFERENCES users(id)','adjusted_at':'TEXT','replenishment_cycle_id':'INTEGER REFERENCES replenishment_cycles(id)'}.items():
+            if column not in pr_item_columns:connection.execute(f'ALTER TABLE pr_items ADD COLUMN {column} {definition}')
+        pr_columns={row['name']for row in connection.execute('PRAGMA table_info(purchase_requisitions)')}
+        for column,definition in {'pr_source':"TEXT NOT NULL DEFAULT 'MANUAL'",'trigger_warehouse_id':'INTEGER REFERENCES warehouses(id)','warehouse_submitted_by':'INTEGER REFERENCES users(id)','warehouse_submitted_at':'TEXT','warehouse_closed_by':'INTEGER REFERENCES users(id)','warehouse_closed_at':'TEXT','warehouse_closure_reason':'TEXT'}.items():
+            if column not in pr_columns:connection.execute(f'ALTER TABLE purchase_requisitions ADD COLUMN {column} {definition}')
+        warehouse_columns={row['name']for row in connection.execute('PRAGMA table_info(warehouses)')}
+        for column,definition in {'auto_replenishment_enabled':'INTEGER NOT NULL DEFAULT 0','replenishment_days_json':"TEXT NOT NULL DEFAULT '[0,3]'"}.items():
+            if column not in warehouse_columns:connection.execute(f'ALTER TABLE warehouses ADD COLUMN {column} {definition}')
+        connection.execute("""CREATE TABLE IF NOT EXISTS replenishment_cycles(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,cycle_reference TEXT NOT NULL UNIQUE,warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+            item_id INTEGER NOT NULL REFERENCES items(id),status TEXT NOT NULL DEFAULT 'ACTIVE',pr_id INTEGER REFERENCES purchase_requisitions(id),
+            recommended_base_quantity REAL NOT NULL,stock_quantity_snapshot REAL NOT NULL,min_stock_snapshot REAL NOT NULL,max_stock_snapshot REAL NOT NULL,
+            created_at TEXT NOT NULL DEFAULT(datetime('now')),closed_at TEXT,closure_reason TEXT)""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS replenishment_drafts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,draft_number TEXT NOT NULL UNIQUE,warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+            status TEXT NOT NULL DEFAULT 'Draft' CHECK(status IN('Draft','Review In Progress','Review Complete','Re-Review Required','Converted to PR','Cancelled')),
+            checked_by INTEGER REFERENCES users(id),reviewed_by INTEGER REFERENCES users(id),resulting_pr_id INTEGER REFERENCES purchase_requisitions(id),
+            created_at TEXT NOT NULL DEFAULT(datetime('now')),reviewed_at TEXT,revalidated_at TEXT,converted_at TEXT,cancelled_at TEXT,cancel_reason TEXT)""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS replenishment_draft_lines(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,draft_id INTEGER NOT NULL REFERENCES replenishment_drafts(id),item_id INTEGER NOT NULL REFERENCES items(id),
+            item_code_snapshot TEXT,description_snapshot TEXT,uom TEXT,reorder_level REAL NOT NULL DEFAULT 0,available_qty REAL NOT NULL DEFAULT 0,
+            active_pr_qty REAL NOT NULL DEFAULT 0,outstanding_po_qty REAL NOT NULL DEFAULT 0,inspection_putaway_qty REAL NOT NULL DEFAULT 0,
+            effective_stock_qty REAL NOT NULL DEFAULT 0,system_recommended_qty REAL NOT NULL DEFAULT 0,reviewed_qty REAL NOT NULL DEFAULT 0,
+            adjustment_reason TEXT,status_labels TEXT NOT NULL DEFAULT '',line_status TEXT NOT NULL DEFAULT 'Draft',
+            last_checked_at TEXT NOT NULL DEFAULT(datetime('now')),reviewed_by INTEGER REFERENCES users(id),reviewed_at TEXT,
+            revalidated_at TEXT,revalidation_changes_json TEXT)""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS replenishment_draft_sources(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,line_id INTEGER NOT NULL REFERENCES replenishment_draft_lines(id),
+            source_type TEXT NOT NULL,source_id INTEGER,source_number TEXT,status TEXT,quantity REAL NOT NULL DEFAULT 0,
+            detail_json TEXT,created_at TEXT NOT NULL DEFAULT(datetime('now')))""")
+        pr_columns={row['name']for row in connection.execute('PRAGMA table_info(purchase_requisitions)')}
+        if 'replenishment_draft_id' not in pr_columns:connection.execute('ALTER TABLE purchase_requisitions ADD COLUMN replenishment_draft_id INTEGER REFERENCES replenishment_drafts(id)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_replenishment_drafts_warehouse_status ON replenishment_drafts(warehouse_id,status)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_replenishment_lines_draft_item ON replenishment_draft_lines(draft_id,item_id)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_replenishment_sources_line ON replenishment_draft_sources(line_id,source_type)')
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_replenishment_active_scope ON replenishment_cycles(warehouse_id,item_id) WHERE status='ACTIVE'")
+        connection.execute("""CREATE TABLE IF NOT EXISTS replenishment_runs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),scheduled_date TEXT NOT NULL,
+            scheduled_run_time TEXT NOT NULL,actual_run_at TEXT NOT NULL DEFAULT(datetime('now')),run_type TEXT NOT NULL,status TEXT NOT NULL,
+            items_checked INTEGER NOT NULL DEFAULT 0,prs_generated INTEGER NOT NULL DEFAULT 0,items_skipped_active INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT,run_by INTEGER REFERENCES users(id),UNIQUE(warehouse_id,scheduled_date,run_type))""")
+        # Retired automation tables/columns remain only for historical references.
+        connection.execute('UPDATE warehouses SET auto_replenishment_enabled=0 WHERE auto_replenishment_enabled<>0')
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS retired_auto_pr_insert BEFORE INSERT ON purchase_requisitions
+            WHEN NEW.auto_generated<>0 OR NEW.pr_source='AUTO_REPLENISHMENT'
+            BEGIN SELECT RAISE(ABORT,'Use Stock Replenishment Check to create a reviewed PR'); END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS retired_auto_pr_update BEFORE UPDATE OF auto_generated,pr_source ON purchase_requisitions
+            WHEN (NEW.auto_generated<>0 AND OLD.auto_generated=0) OR (NEW.pr_source='AUTO_REPLENISHMENT' AND OLD.pr_source<>'AUTO_REPLENISHMENT')
+            BEGIN SELECT RAISE(ABORT,'Automatic PR generation is retired'); END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS retired_warehouse_auto_pr_insert AFTER INSERT ON warehouses
+            WHEN NEW.auto_replenishment_enabled<>0 BEGIN UPDATE warehouses SET auto_replenishment_enabled=0 WHERE id=NEW.id; END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS retired_warehouse_auto_pr_update BEFORE UPDATE OF auto_replenishment_enabled ON warehouses
+            WHEN NEW.auto_replenishment_enabled<>0 BEGIN SELECT RAISE(ABORT,'Automatic PR scheduling is retired'); END""")
+        for table in ('replenishment_cycles','replenishment_runs'):
+            connection.execute(f"""CREATE TRIGGER IF NOT EXISTS retired_{table}_insert BEFORE INSERT ON {table}
+                BEGIN SELECT RAISE(ABORT,'Use Stock Replenishment Check'); END""")
         company_columns = {row['name'] for row in connection.execute('PRAGMA table_info(company)')}
         if {'currency', 'base_currency'} <= company_columns:
             connection.execute(
@@ -201,6 +397,27 @@ def ensure_company_employee_schema():
             "other_charges":"REAL NOT NULL DEFAULT 0", "delivery_date":"TEXT", "warranty":"TEXT", "technical_specifications":"TEXT"
         }.items():
             if column not in po_item_columns: connection.execute(f"ALTER TABLE po_items ADD COLUMN {column} {definition}")
+        po_columns = {row["name"] for row in connection.execute("PRAGMA table_info(purchase_orders)")}
+        if "delivery_warehouse_id" not in po_columns:
+            connection.execute("ALTER TABLE purchase_orders ADD COLUMN delivery_warehouse_id INTEGER REFERENCES warehouses(id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_purchase_orders_delivery_warehouse ON purchase_orders(delivery_warehouse_id,status)")
+        quantity_snapshots = {
+            'pr_items': {'transaction_quantity':'REAL','transaction_uom':'TEXT','conversion_factor_used':'REAL','base_quantity':'REAL','base_uom':'TEXT'},
+            'po_items': {'transaction_quantity':'REAL','transaction_uom':'TEXT','conversion_factor_used':'REAL','base_quantity':'REAL','base_uom':'TEXT','line_amount':'REAL','tax_amount':'REAL','line_total':'REAL'},
+            'grn_items': {'transaction_uom':'TEXT','conversion_factor_used':'REAL','received_base_quantity':'REAL','accepted_base_quantity':'REAL','rejected_base_quantity':'REAL','base_uom':'TEXT','inventory_unit_cost':'REAL','inventory_value':'REAL'},
+            'material_issue_items': {'transaction_quantity':'REAL','transaction_uom':'TEXT','conversion_factor_used':'REAL','base_quantity':'REAL','base_uom':'TEXT'},
+            'returns': {'transaction_quantity':'REAL','transaction_uom':'TEXT','conversion_factor_used':'REAL','base_quantity':'REAL','base_uom':'TEXT','unit_cost':'REAL','return_value':'REAL','inventory_status':'TEXT'},
+        }
+        for table, definitions in quantity_snapshots.items():
+            existing = {row['name'] for row in connection.execute(f'PRAGMA table_info({table})')}
+            for column, definition in definitions.items():
+                if column not in existing:connection.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+        connection.execute("""CREATE TABLE IF NOT EXISTS employee_return_allocations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,return_id INTEGER NOT NULL REFERENCES returns(id),
+            issue_item_id INTEGER NOT NULL REFERENCES material_issue_items(id),transaction_quantity REAL NOT NULL,
+            base_quantity REAL NOT NULL,unit_cost REAL NOT NULL,value REAL NOT NULL,
+            UNIQUE(return_id,issue_item_id))""")
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_return_allocations_issue ON employee_return_allocations(issue_item_id)')
         for name in (
             "Production", "Laboratory", "Quality", "Engineering", "Maintenance",
             "HSE", "Planning", "Finance", "Human Resources", "Administration",
@@ -211,7 +428,6 @@ def ensure_company_employee_schema():
                 "(SELECT 1 FROM departments WHERE lower(trim(name))=lower(trim(?)) AND deleted_at IS NULL)",
                 (name, name),
             )
-        connection.execute("UPDATE shifts SET break_minutes=30 WHERE active_yn=1 AND COALESCE(break_minutes,0)=0")
         warehouse_columns = {row["name"] for row in connection.execute("PRAGMA table_info(warehouses)")}
         if "operating_start_time" not in warehouse_columns:
             connection.execute("ALTER TABLE warehouses ADD COLUMN operating_start_time TEXT NOT NULL DEFAULT '03:00'")
@@ -262,7 +478,7 @@ def ensure_company_employee_schema():
             try:operating_days={int(value)for value in __import__('json').loads(warehouse['operating_days_json']or'[]')}
             except (TypeError,ValueError):operating_days=set(range(7))
             for weekday in range(7):
-                is_open=int(bool(warehouse['operation_24h_yn']or weekday in operating_days));opening='00:00'if warehouse['operation_24h_yn']else warehouse['operating_start_time']if is_open else None;closing='00:00'if warehouse['operation_24h_yn']else warehouse['operating_end_time']if is_open else None
+                is_open=int(bool(weekday in operating_days));opening='00:00'if warehouse['operation_24h_yn']else warehouse['operating_start_time']if is_open else None;closing='00:00'if warehouse['operation_24h_yn']else warehouse['operating_end_time']if is_open else None
                 connection.execute('INSERT OR IGNORE INTO warehouse_operating_schedules(warehouse_id,weekday,is_open,open_time,close_time,cross_midnight_yn)VALUES(?,?,?,?,?,?)',(warehouse['id'],weekday,is_open,opening,closing,int(bool(is_open and closing<=opening))))
         calendar_columns={row['name'] for row in connection.execute('PRAGMA table_info(employee_work_calendar)')}
         for column,definition in {'warehouse_time_zone':'TEXT','warehouse_open_time':'TEXT','warehouse_close_time':'TEXT'}.items():
@@ -270,6 +486,8 @@ def ensure_company_employee_schema():
         holiday_columns={row['name'] for row in connection.execute('PRAGMA table_info(holidays)')}
         holiday_additions={'region':'TEXT','observed_date':'TEXT','calendar_year':'INTEGER','day_scope':'TEXT NOT NULL DEFAULT \'FULL_DAY\'','start_time':'TEXT','end_time':'TEXT','applicability':'TEXT NOT NULL DEFAULT \'WAREHOUSE\'','notes':'TEXT'}
         for column,definition in holiday_additions.items():
+            if column not in holiday_columns:connection.execute(f'ALTER TABLE holidays ADD COLUMN {column} {definition}')
+        for column,definition in {'holiday_end_date':'TEXT','procurement_work_required':'INTEGER NOT NULL DEFAULT 0','procurement_work_reason':'TEXT','warehouse_id':'INTEGER REFERENCES warehouses(id)'}.items():
             if column not in holiday_columns:connection.execute(f'ALTER TABLE holidays ADD COLUMN {column} {definition}')
         exchange_columns={row['name'] for row in connection.execute('PRAGMA table_info(exchange_rates)')}
         for column,definition in {'synchronized_at':'TEXT','synchronized_by':'INTEGER REFERENCES users(id)'}.items():
@@ -298,25 +516,25 @@ def ensure_company_employee_schema():
         if not shift_mode_initialized:
             connection.execute("INSERT INTO settings(key,value)VALUES('procurement_shifts_enabled','1')ON CONFLICT(key)DO UPDATE SET value='1'")
         procurement_start=(connection.execute("SELECT value FROM settings WHERE key='procurement_operating_start_time'").fetchone()or{'value':'08:00'})['value'];procurement_end=(connection.execute("SELECT value FROM settings WHERE key='procurement_operating_end_time'").fetchone()or{'value':'17:00'})['value'];procurement_enabled=(connection.execute("SELECT value FROM settings WHERE key='procurement_shifts_enabled'").fetchone()or{'value':'0'})['value']=='1'
-        psh,psm=map(int,procurement_start[:5].split(':'));peh,pem=map(int,procurement_end[:5].split(':'));procurement_duration=((peh*60+pem)-(psh*60+psm))%1440 or 1440;procurement_break=30 if procurement_duration>=360 else(15 if procurement_duration>=240 else 0);procurement_finish=(peh*60+pem+procurement_break)%1440;procurement_scheduled_end=f'{procurement_finish//60:02d}:{procurement_finish%60:02d}'
+        psh,psm=map(int,procurement_start[:5].split(':'));peh,pem=map(int,procurement_end[:5].split(':'));procurement_duration=((peh*60+pem)-(psh*60+psm))%1440 or 1440;procurement_break=30 if procurement_duration>=360 else(15 if procurement_duration>=240 else 0);procurement_finish=(peh*60+pem)%1440;procurement_scheduled_end=f'{procurement_finish//60:02d}:{procurement_finish%60:02d}'
         connection.execute("""INSERT OR IGNORE INTO shifts(shift_code,shift_label,start_time,end_time,cross_midnight_yn,break_minutes,department_scope,active_yn,warehouse_id,schedule_mode)
-          VALUES('PROC-STANDARD','Procurement Standard Hours',?,?,?,?,'Procurement',?,NULL,'STANDARD')""",(procurement_start,procurement_scheduled_end,int(psh*60+psm+procurement_duration+procurement_break>=1440),procurement_break,int(not procurement_enabled)))
+          VALUES('PROC-STANDARD','Procurement Standard Hours',?,?,?,?,'Procurement',?,NULL,'STANDARD')""",(procurement_start,procurement_scheduled_end,int(psh*60+psm+procurement_duration>=1440),procurement_break,int(not procurement_enabled)))
         connection.execute("UPDATE shifts SET active_yn=? WHERE warehouse_id IS NULL AND schedule_mode='MULTI'",(int(procurement_enabled),))
-        connection.execute("UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=? WHERE warehouse_id IS NULL AND schedule_mode='STANDARD'",(procurement_start,procurement_scheduled_end,int(psh*60+psm+procurement_duration+procurement_break>=1440),procurement_break,int(not procurement_enabled)))
+        connection.execute("UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=? WHERE warehouse_id IS NULL AND schedule_mode='STANDARD'",(procurement_start,procurement_scheduled_end,int(psh*60+psm+procurement_duration>=1440),procurement_break,int(not procurement_enabled)))
         for warehouse in connection.execute('SELECT id,operating_start_time,operating_end_time,shifts_enabled_yn FROM warehouses WHERE deleted_at IS NULL').fetchall():
             start=warehouse['operating_start_time'];end=warehouse['operating_end_time'];enabled=bool(warehouse['shifts_enabled_yn'])
             sh,sm=map(int,start[:5].split(':'));eh,em=map(int,end[:5].split(':'));duration=((eh*60+em)-(sh*60+sm))%1440 or 1440
-            standard_break=30 if duration>=360 else(15 if duration>=240 else 0);scheduled_finish=(eh*60+em+standard_break)%1440;scheduled_end=f'{scheduled_finish//60:02d}:{scheduled_finish%60:02d}'
+            standard_break=30 if duration>=360 else(15 if duration>=240 else 0);scheduled_finish=(eh*60+em)%1440;scheduled_end=f'{scheduled_finish//60:02d}:{scheduled_finish%60:02d}'
             connection.execute("""INSERT OR IGNORE INTO shifts(shift_code,shift_label,start_time,end_time,cross_midnight_yn,break_minutes,department_scope,active_yn,warehouse_id,schedule_mode)
-              VALUES(?,?,?, ?,?,?,'Warehouse',?,?,'STANDARD')""",(f"WH{warehouse['id']}-STANDARD",'Standard Operating Hours',start,scheduled_end,int(sh*60+sm+duration+standard_break>=1440),standard_break,int(not enabled),warehouse['id']))
-            connection.execute("UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=? WHERE warehouse_id=? AND schedule_mode='STANDARD'",(start,scheduled_end,int(sh*60+sm+duration+standard_break>=1440),standard_break,int(not enabled),warehouse['id']))
+              VALUES(?,?,?, ?,?,?,'Warehouse',?,?,'STANDARD')""",(f"WH{warehouse['id']}-STANDARD",'Standard Operating Hours',start,scheduled_end,int(sh*60+sm+duration>=1440),standard_break,int(not enabled),warehouse['id']))
+            connection.execute("UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=? WHERE warehouse_id=? AND schedule_mode='STANDARD'",(start,scheduled_end,int(sh*60+sm+duration>=1440),standard_break,int(not enabled),warehouse['id']))
             if not shift_mode_initialized:
                 rows=list(connection.execute("SELECT id FROM shifts WHERE warehouse_id=? AND schedule_mode='MULTI' ORDER BY ((CAST(substr(start_time,1,2) AS INTEGER)*60+CAST(substr(start_time,4,2) AS INTEGER))-(?)+1440)%1440,id",(warehouse['id'],sh*60+sm)).fetchall())
                 count=(duration+479)//480
                 for index,row in enumerate(rows):
                     if index<count:
-                        block=sh*60+sm+index*480;minutes=min(480,duration-index*480);break_minutes=30 if minutes>=360 else(15 if minutes>=240 else 0);finish=(block+minutes+break_minutes)%1440
-                        connection.execute('UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=? WHERE id=?',(f'{(block%1440)//60:02d}:{block%60:02d}',f'{finish//60:02d}:{finish%60:02d}',int((block%1440)+minutes+break_minutes>=1440),break_minutes,int(enabled),row['id']))
+                        block=sh*60+sm+index*480;minutes=min(480,duration-index*480);break_minutes=30 if minutes>=360 else(15 if minutes>=240 else 0);finish=(block+minutes)%1440
+                        connection.execute('UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=? WHERE id=?',(f'{(block%1440)//60:02d}:{block%60:02d}',f'{finish//60:02d}:{finish%60:02d}',int((block%1440)+minutes>=1440),break_minutes,int(enabled),row['id']))
                     else:connection.execute('UPDATE shifts SET active_yn=0 WHERE id=?',(row['id'],))
         if not shift_mode_initialized:connection.execute("INSERT INTO settings(key,value)VALUES('shift_mode_initialized','1')")
         coverage_repaired=connection.execute("SELECT 1 FROM settings WHERE key='shift_mode_coverage_repaired_v2'").fetchone()
@@ -326,16 +544,12 @@ def ensure_company_employee_schema():
                 rows=list(connection.execute("SELECT id FROM shifts WHERE warehouse_id=? AND schedule_mode='MULTI' ORDER BY ((CAST(substr(start_time,1,2) AS INTEGER)*60+CAST(substr(start_time,4,2) AS INTEGER))-(?)+1440)%1440,id",(warehouse['id'],sh*60+sm)).fetchall())
                 for index,row in enumerate(rows):
                     if index<count:
-                        block=sh*60+sm+index*480;minutes=min(480,duration-index*480);break_minutes=30 if minutes>=360 else(15 if minutes>=240 else 0);finish=(block+minutes+break_minutes)%1440
-                        connection.execute('UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=1 WHERE id=?',(f'{(block%1440)//60:02d}:{block%60:02d}',f'{finish//60:02d}:{finish%60:02d}',int((block%1440)+minutes+break_minutes>=1440),break_minutes,row['id']))
+                        block=sh*60+sm+index*480;minutes=min(480,duration-index*480);break_minutes=30 if minutes>=360 else(15 if minutes>=240 else 0);finish=(block+minutes)%1440
+                        connection.execute('UPDATE shifts SET start_time=?,end_time=?,cross_midnight_yn=?,break_minutes=?,active_yn=1 WHERE id=?',(f'{(block%1440)//60:02d}:{block%60:02d}',f'{finish//60:02d}:{finish%60:02d}',int((block%1440)+minutes>=1440),break_minutes,row['id']))
                     else:connection.execute('UPDATE shifts SET active_yn=0 WHERE id=?',(row['id'],))
             connection.execute("INSERT INTO settings(key,value)VALUES('shift_mode_coverage_repaired_v2','1')")
         break_end_migrated=connection.execute("SELECT 1 FROM settings WHERE key='break_inclusive_shift_end_v1'").fetchone()
         if not break_end_migrated:
-            if shift_mode_initialized:
-                for shift in connection.execute("SELECT id,start_time,end_time,break_minutes FROM shifts WHERE schedule_mode='MULTI'").fetchall():
-                    eh,em=map(int,shift['end_time'][:5].split(':'));finish=(eh*60+em+int(shift['break_minutes']or 0))%1440;scheduled_end=f'{finish//60:02d}:{finish%60:02d}'
-                    connection.execute('UPDATE shifts SET end_time=?,cross_midnight_yn=? WHERE id=?',(scheduled_end,int(scheduled_end<=shift['start_time']),shift['id']))
             connection.execute("UPDATE employee_work_calendar SET shift_end=(SELECT end_time FROM shifts WHERE shifts.id=employee_work_calendar.shift_id) WHERE shift_id IS NOT NULL AND calendar_date>=date('now') AND manual_override_yn=0")
             connection.execute("INSERT INTO settings(key,value)VALUES('break_inclusive_shift_end_v1','1')")
         active_count_repaired=connection.execute("SELECT 1 FROM settings WHERE key='shift_active_count_repaired_v3'").fetchone()
@@ -351,7 +565,7 @@ def ensure_company_employee_schema():
                 if not warehouse['shifts_enabled_yn']:continue
                 start=warehouse['operating_start_time'];sh,sm=map(int,start[:5].split(':'));eh,em=map(int,warehouse['operating_end_time'][:5].split(':'));duration=((eh*60+em)-(sh*60+sm))%1440 or 1440;offset=0;design=[]
                 while True:
-                    working=duration if duration<=480 else 480;break_minutes=30 if working>=360 else(15 if working>=240 else 0);scheduled=working+break_minutes;finish=(sh*60+sm+offset+scheduled)%1440
+                    working=duration if duration<=480 else 480;break_minutes=30 if working>=360 else(15 if working>=240 else 0);scheduled=working;finish=(sh*60+sm+offset+scheduled)%1440
                     design.append((f'{((sh*60+sm+offset)%1440)//60:02d}:{(sh*60+sm+offset)%60:02d}',f'{finish//60:02d}:{finish%60:02d}',int((sh*60+sm+offset)%1440+scheduled>=1440),break_minutes))
                     if offset+working>=duration:break
                     offset+=scheduled-120
@@ -370,7 +584,7 @@ def ensure_company_employee_schema():
                 start=warehouse['operating_start_time'];sh,sm=map(int,start[:5].split(':'));eh,em=map(int,warehouse['operating_end_time'][:5].split(':'));duration=((eh*60+em)-(sh*60+sm))%1440 or 1440
                 if duration<=480:break_minutes=30 if duration>=360 else(15 if duration>=240 else 0);offsets=[0];scheduled_lengths=[duration]
                 else:
-                    break_minutes=30;final_offset=duration-510;count=max(2,(final_offset+389)//390+1);offsets=[0]+[int(((sh*60+sm+index*final_offset/(count-1))+15)//30)*30-(sh*60+sm) for index in range(1,count-1)]+[final_offset];scheduled_lengths=[510]*count
+                    break_minutes=30;final_offset=duration-480;count=max(2,(final_offset+359)//360+1);offsets=[0]+[int(((sh*60+sm+index*final_offset/(count-1))+15)//30)*30-(sh*60+sm) for index in range(1,count-1)]+[final_offset];scheduled_lengths=[480]*count
                 design=[]
                 for offset,scheduled in zip(offsets,scheduled_lengths):
                     begin=sh*60+sm+offset;finish=begin+scheduled;design.append((f'{(begin%1440)//60:02d}:{begin%60:02d}',f'{(finish%1440)//60:02d}:{finish%60:02d}',int((begin%1440)+scheduled>=1440),break_minutes))
@@ -396,7 +610,7 @@ def ensure_company_employee_schema():
                 start=warehouse['operating_start_time'];sh,sm=map(int,start[:5].split(':'));eh,em=map(int,warehouse['operating_end_time'][:5].split(':'));duration=((eh*60+em)-(sh*60+sm))%1440 or 1440
                 if duration<=480:offsets=[0];scheduled_lengths=[duration];break_minutes=30 if duration>=360 else(15 if duration>=240 else 0)
                 else:
-                    break_minutes=30;final_offset=duration-510;count=max(2,(final_offset+389)//390+1);offsets=[0]+[int(((sh*60+sm+index*final_offset/(count-1))+15)//30)*30-(sh*60+sm) for index in range(1,count-1)]+[final_offset];scheduled_lengths=[510]*count
+                    break_minutes=30;final_offset=duration-480;count=max(2,(final_offset+359)//360+1);offsets=[0]+[int(((sh*60+sm+index*final_offset/(count-1))+15)//30)*30-(sh*60+sm) for index in range(1,count-1)]+[final_offset];scheduled_lengths=[480]*count
                 rows=list(connection.execute("SELECT id FROM shifts WHERE warehouse_id=? AND schedule_mode='MULTI' ORDER BY ((CAST(substr(start_time,1,2) AS INTEGER)*60+CAST(substr(start_time,4,2) AS INTEGER))-(?)+1440)%1440,id",(warehouse['id'],sh*60+sm)).fetchall())
                 labels=['First Shift','Second Shift','Third Shift','Night Shift']
                 for index,(offset,scheduled) in enumerate(zip(offsets,scheduled_lengths)):
@@ -405,6 +619,20 @@ def ensure_company_employee_schema():
                 for row in rows[len(offsets):]:connection.execute('UPDATE shifts SET active_yn=0 WHERE id=?',(row['id'],))
             connection.execute("UPDATE employee_work_calendar SET shift_start=(SELECT start_time FROM shifts WHERE shifts.id=employee_work_calendar.shift_id),shift_end=(SELECT end_time FROM shifts WHERE shifts.id=employee_work_calendar.shift_id) WHERE shift_id IS NOT NULL AND calendar_date>=date('now') AND manual_override_yn=0")
             connection.execute("INSERT INTO settings(key,value)VALUES('warehouse_half_hour_shift_starts_v7','1')")
+        # Internal breaks do not extend shift boundaries. Preserve historical calendars.
+        if 'work_periods_json' not in {row['name'] for row in connection.execute('PRAGMA table_info(employee_work_calendar)')}:
+            connection.execute("ALTER TABLE employee_work_calendar ADD COLUMN work_periods_json TEXT")
+        if not connection.execute("SELECT 1 FROM settings WHERE key='internal_shift_breaks_v1'").fetchone():
+            corrected=[]
+            for shift in connection.execute("SELECT * FROM shifts WHERE warehouse_id IS NULL AND schedule_mode='MULTI'").fetchall():
+                sh,sm=map(int,shift['start_time'][:5].split(':'));eh,em=map(int,shift['end_time'][:5].split(':'))
+                duration=((eh*60+em)-(sh*60+sm))%1440 or 1440
+                if duration==480+int(shift['break_minutes']or 0):
+                    finish=(sh*60+sm+480)%1440;end=f'{finish//60:02d}:{finish%60:02d}'
+                    connection.execute('UPDATE shifts SET end_time=?,cross_midnight_yn=? WHERE id=?',(end,int(sh*60+sm+480>=1440),shift['id']))
+                    corrected.append({'id':shift['id'],'previous_end':shift['end_time'],'end':end})
+            connection.execute("UPDATE employee_work_calendar SET shift_end=(SELECT end_time FROM shifts WHERE shifts.id=employee_work_calendar.shift_id) WHERE shift_id IS NOT NULL AND calendar_date>=date('now') AND manual_override_yn=0 AND status<>'LOCKED'")
+            connection.execute("INSERT INTO settings(key,value)VALUES('internal_shift_breaks_v1',?)",(json.dumps(corrected),))
         taxonomy = {
             'Raw Material':['Cement','Fine Aggregate / Sand','Coarse Aggregate','Admixture','Water','Steel','Reinforcement Steel','Steel Mesh','Prestressing Steel','Fibres','Inserts & Cast-in Items'],
             'Production Consumable':['Abrasive','Binding & Tying','Curing','Grout','Release Agent','Repair Material','Sealant','Spacers & Chairs','Steel Consumable','Welding','Formwork Consumable'],
@@ -437,5 +665,398 @@ def ensure_company_employee_schema():
             received=float(totals['received']or 0);accepted=float(totals['accepted']or 0)
             rating=0 if not received else round(5*(min(1,accepted/received)*.45+min(1,accepted/float(ordered or accepted or 1))*.25+(float(delivery['on_time']or 0)/float(delivery['deliveries']or 1))*.30),2)
             connection.execute('UPDATE suppliers SET rating=? WHERE id=?',(rating,supplier['id']))
+        connection.execute("""CREATE TABLE IF NOT EXISTS employee_clearances(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,clearance_number TEXT NOT NULL UNIQUE,
+            employee_id INTEGER NOT NULL REFERENCES employees(id),clearance_reason TEXT NOT NULL,reason_comments TEXT,
+            request_date TEXT NOT NULL DEFAULT(date('now')),request_time TEXT NOT NULL DEFAULT(time('now')),
+            initial_status TEXT NOT NULL,current_status TEXT NOT NULL,letter_status TEXT NOT NULL DEFAULT 'Not Generated',
+            initial_outstanding_item_count INTEGER NOT NULL DEFAULT 0,current_outstanding_item_count INTEGER NOT NULL DEFAULT 0,
+            initial_outstanding_value REAL NOT NULL DEFAULT 0,current_outstanding_value REAL NOT NULL DEFAULT 0,
+            unresolved_liability_count INTEGER NOT NULL DEFAULT 0,unresolved_liability_value REAL NOT NULL DEFAULT 0,
+            warehouses_checked_count INTEGER NOT NULL DEFAULT 0,final_verification_at TEXT,clearance_date TEXT,
+            cancellation_reason TEXT,cancelled_by INTEGER REFERENCES users(id),cancelled_at TEXT,
+            created_by INTEGER NOT NULL REFERENCES users(id),created_at TEXT NOT NULL DEFAULT(datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT(datetime('now')))""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS employee_clearance_liabilities(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,clearance_id INTEGER NOT NULL REFERENCES employee_clearances(id),
+            employee_id INTEGER NOT NULL REFERENCES employees(id),item_id INTEGER NOT NULL REFERENCES items(id),
+            warehouse_id INTEGER REFERENCES warehouses(id),original_issue_id INTEGER,source_type TEXT NOT NULL DEFAULT 'Material Return',
+            source_id INTEGER,condition TEXT NOT NULL,liability_status TEXT NOT NULL,liability_value REAL NOT NULL DEFAULT 0,
+            resolution_reason TEXT,resolution_reference TEXT,resolved_by INTEGER REFERENCES users(id),resolved_at TEXT,
+            created_at TEXT NOT NULL DEFAULT(datetime('now')),UNIQUE(clearance_id,source_type,source_id))""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS employee_clearance_documents(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,clearance_id INTEGER NOT NULL REFERENCES employee_clearances(id),
+            document_number TEXT NOT NULL UNIQUE,document_type TEXT NOT NULL,status_snapshot TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,total_outstanding_value_snapshot REAL NOT NULL DEFAULT 0,
+            generated_by INTEGER NOT NULL REFERENCES users(id),generated_at TEXT NOT NULL DEFAULT(datetime('now')))""")
+        connection.execute('DROP INDEX IF EXISTS idx_employee_clearance_active')
+        connection.execute("CREATE UNIQUE INDEX idx_employee_clearance_active ON employee_clearances(employee_id) WHERE current_status NOT IN('Cancelled','Completed') AND letter_status<>'Clearance Certificate Issued'")
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_employee_clearance_status_date ON employee_clearances(current_status,request_date)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_employee_clearance_liability ON employee_clearance_liabilities(clearance_id,liability_status)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_material_issue_employee_status ON material_issues(employee_id,status)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_returns_employee_item ON returns(employee_id,item_id)')
+        connection.execute("""CREATE TABLE IF NOT EXISTS inventory_quarantine(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,item_id INTEGER NOT NULL REFERENCES items(id),
+            warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),location_id INTEGER REFERENCES locations(id),
+            quantity REAL NOT NULL CHECK(quantity>0),unit_cost REAL NOT NULL DEFAULT 0,
+            inventory_status TEXT NOT NULL CHECK(inventory_status IN('DAMAGED','REPAIR_PENDING','INSPECTION_PENDING','PUT_AWAY_PENDING','REJECTED')),
+            source_table TEXT NOT NULL,source_id INTEGER NOT NULL,created_by INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL DEFAULT(datetime('now')),released_at TEXT,released_by INTEGER REFERENCES users(id))""")
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_inventory_quarantine_warehouse_status ON inventory_quarantine(warehouse_id,inventory_status,item_id)')
+        quarantine_columns={row['name']for row in connection.execute('PRAGMA table_info(inventory_quarantine)')}
+        for column,definition in {'batch':'TEXT','expiry_date':'TEXT','source_grn_item_id':'INTEGER REFERENCES grn_items(id)','transaction_uom':'TEXT','base_uom':'TEXT','audit_reference':'TEXT','tool_id':'INTEGER REFERENCES tools(id)'}.items():
+            if column not in quarantine_columns:connection.execute(f'ALTER TABLE inventory_quarantine ADD COLUMN {column} {definition}')
+        connection.execute("""CREATE TABLE IF NOT EXISTS goods_inspections(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,inspection_number TEXT NOT NULL UNIQUE,grn_id INTEGER REFERENCES grns(id),
+            grn_item_id INTEGER REFERENCES grn_items(id),hold_id INTEGER NOT NULL REFERENCES inventory_quarantine(id),source_table TEXT NOT NULL,source_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL REFERENCES items(id),warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+            inspected_quantity REAL NOT NULL,passed_quantity REAL NOT NULL,failed_quantity REAL NOT NULL,
+            decision TEXT NOT NULL CHECK(decision IN('PASSED','PARTIALLY_PASSED','FAILED')),
+            remarks TEXT,inspected_by INTEGER NOT NULL REFERENCES users(id),inspected_at TEXT NOT NULL DEFAULT(datetime('now')),
+            audit_reference TEXT NOT NULL)""")
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_goods_inspections_grn_line ON goods_inspections(grn_item_id,inspected_at)')
+        inspection_columns={row['name']for row in connection.execute('PRAGMA table_info(goods_inspections)')}
+        for column,definition in {'source_table':"TEXT NOT NULL DEFAULT 'grn_items'",'source_id':'INTEGER NOT NULL DEFAULT 0','inspector_name':'TEXT','inspector_department':'TEXT','inspector_designation':'TEXT'}.items():
+            if column not in inspection_columns:connection.execute(f'ALTER TABLE goods_inspections ADD COLUMN {column} {definition}')
+        connection.execute("""CREATE TABLE IF NOT EXISTS tool_custody_history(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,tool_id INTEGER NOT NULL REFERENCES tools(id),
+            employee_id INTEGER NOT NULL REFERENCES employees(id),warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+            checked_out_by INTEGER NOT NULL REFERENCES users(id),checked_out_at TEXT NOT NULL DEFAULT(datetime('now')),
+            checked_in_by INTEGER REFERENCES users(id),checked_in_at TEXT,return_condition TEXT,
+            status TEXT NOT NULL DEFAULT 'CHECKED_OUT')""")
+        connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_active_custody ON tool_custody_history(tool_id) WHERE status=\'CHECKED_OUT\'')
+        tool_columns={row['name'] for row in connection.execute('PRAGMA table_info(tools)')}
+        for column,definition in {
+            'status':"TEXT NOT NULL DEFAULT 'Available' CHECK(status IN('Pending Tool Registration','Available','Assigned','Damaged','Quarantined','Lost','Retired','Under Repair'))",
+            'source_grn_item_id':'INTEGER REFERENCES grn_items(id)',
+            'source_unit_number':'INTEGER CHECK(source_unit_number>0)',
+            'registered_at':'TEXT','registered_by':'INTEGER REFERENCES users(id)',
+            'calibration_required_yn':'INTEGER NOT NULL DEFAULT 0 CHECK(calibration_required_yn IN(0,1))',
+            'location_id':'INTEGER REFERENCES locations(id)','custody_unit_cost':'REAL NOT NULL DEFAULT 0',
+            'transfer_id':'INTEGER REFERENCES transfers(id)','transfer_pending_yn':'INTEGER NOT NULL DEFAULT 0',
+        }.items():
+            if column not in tool_columns:connection.execute(f'ALTER TABLE tools ADD COLUMN {column} {definition}')
+        if 'status' not in tool_columns:
+            connection.execute("""UPDATE tools SET status=CASE WHEN employee_id IS NOT NULL AND return_date IS NULL THEN 'Assigned'
+                WHEN condition='Damaged' THEN 'Damaged' WHEN condition='Needs Repair' THEN 'Under Repair'
+                WHEN condition IN('Lost','Retired','Quarantined') THEN condition ELSE 'Available' END,
+                registered_at=datetime('now'),calibration_required_yn=CASE WHEN NULLIF(calibration_due_date,'') IS NOT NULL THEN 1 ELSE 0 END""")
+        connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_grn_unit ON tools(source_grn_item_id,source_unit_number) WHERE source_grn_item_id IS NOT NULL')
+        grn_columns={row['name'] for row in connection.execute('PRAGMA table_info(grns)')}
+        for column in ('request_key','request_payload'):
+            if column not in grn_columns:connection.execute(f'ALTER TABLE grns ADD COLUMN {column} TEXT')
+        connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_grn_request_key ON grns(request_key) WHERE request_key IS NOT NULL')
+        for trigger in ('tool_source_guard','tool_serial_insert','tool_serial_update','tool_registration_guard','tool_grn_identity_immutable','tool_issue_guard','tool_custody_guard','tool_new_assignment_guard'):
+            connection.execute(f'DROP TRIGGER IF EXISTS {trigger}')
+        connection.execute("""CREATE TRIGGER tool_new_assignment_guard BEFORE INSERT ON tools
+            WHEN NEW.employee_id IS NOT NULL OR NEW.status='Assigned'
+            BEGIN SELECT RAISE(ABORT,'Register the tool before manual issue'); END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS tool_source_guard BEFORE INSERT ON tools
+            WHEN NEW.source_grn_item_id IS NOT NULL
+            BEGIN SELECT CASE WHEN NEW.source_unit_number IS NULL OR NEW.source_unit_number<>CAST(NEW.source_unit_number AS INTEGER) OR NEW.status<>'Pending Tool Registration' OR NEW.employee_id IS NOT NULL
+                OR NOT EXISTS(SELECT 1 FROM grn_items gi JOIN items i ON i.id=gi.item_id WHERE gi.id=NEW.source_grn_item_id
+                    AND gi.item_id=NEW.item_id AND gi.warehouse_id=NEW.warehouse_id AND i.consumable_returnable='Returnable'
+                    AND NEW.source_unit_number<=gi.accepted_base_quantity)
+                THEN RAISE(ABORT,'Invalid pending GRN tool unit') END; END""")
+        for operation in ('INSERT','UPDATE'):
+            connection.execute(f"""CREATE TRIGGER IF NOT EXISTS tool_serial_{operation.lower()} BEFORE {operation} ON tools
+                WHEN NULLIF(trim(NEW.serial_number),'') IS NOT NULL AND EXISTS(SELECT 1 FROM tools WHERE lower(trim(serial_number))=lower(trim(NEW.serial_number)) AND id<>NEW.id)
+                BEGIN SELECT RAISE(ABORT,'Manufacturer serial number already registered'); END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS tool_registration_guard BEFORE UPDATE OF status,registered_at ON tools
+            WHEN NEW.status='Available' AND (NEW.registered_at IS NULL OR NULLIF(trim(NEW.serial_number),'') IS NULL)
+            BEGIN SELECT RAISE(ABORT,'Complete tool registration before making it available'); END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS tool_grn_identity_immutable BEFORE UPDATE OF source_grn_item_id,source_unit_number,tool_code,item_id ON tools
+            WHEN OLD.source_grn_item_id IS NOT NULL AND (NEW.source_grn_item_id IS NOT OLD.source_grn_item_id OR NEW.source_unit_number IS NOT OLD.source_unit_number OR NEW.tool_code<>OLD.tool_code OR NEW.item_id<>OLD.item_id)
+            BEGIN SELECT RAISE(ABORT,'GRN tool identity cannot be changed'); END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS tool_issue_guard BEFORE UPDATE OF employee_id,status ON tools
+            WHEN NEW.employee_id IS NOT NULL AND NEW.return_date IS NULL AND (OLD.employee_id IS NOT NEW.employee_id OR OLD.status<>'Assigned')
+            BEGIN
+              SELECT CASE WHEN OLD.status<>'Available' OR OLD.registered_at IS NULL OR COALESCE(OLD.condition,'')<>'Good' OR COALESCE(NEW.condition,'')<>'Good'
+                OR OLD.employee_id IS NOT NULL OR NEW.status<>'Assigned'
+                OR (OLD.source_grn_item_id IS NOT NULL AND OLD.location_id IS NULL)
+                OR (OLD.calibration_required_yn=1 AND (date(OLD.calibration_due_date) IS NULL OR date(OLD.calibration_due_date)<date('now')))
+                OR OLD.transfer_pending_yn=1
+                OR EXISTS(SELECT 1 FROM inventory_quarantine WHERE ((source_table='tools' AND source_id=OLD.id) OR tool_id=OLD.id) AND released_at IS NULL)
+                OR NOT EXISTS(SELECT 1 FROM employees WHERE id=NEW.employee_id AND status='Active' AND deleted_at IS NULL)
+                OR NEW.warehouse_id<>OLD.warehouse_id
+                THEN RAISE(ABORT,'Tool is not eligible for issue') END;
+            END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS tool_custody_guard BEFORE INSERT ON tool_custody_history
+            WHEN NEW.status='CHECKED_OUT' AND NOT EXISTS(SELECT 1 FROM tools WHERE id=NEW.tool_id AND status='Assigned' AND employee_id=NEW.employee_id AND warehouse_id=NEW.warehouse_id AND return_date IS NULL)
+            BEGIN SELECT RAISE(ABORT,'Custody must match assigned tool and warehouse'); END""")
+        connection.execute("""CREATE TABLE IF NOT EXISTS three_way_match_tolerances(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,company_id INTEGER NOT NULL REFERENCES company(id),
+            component TEXT NOT NULL CHECK(component IN('quantity','unit_price','line_value','total_value','tax','freight','other_charges','rounding')),
+            percentage_tolerance REAL,absolute_tolerance REAL,currency TEXT,active_yn INTEGER NOT NULL DEFAULT 1,
+            effective_from TEXT NOT NULL DEFAULT(date('now')),effective_until TEXT,created_by INTEGER REFERENCES users(id),
+            created_at TEXT NOT NULL DEFAULT(datetime('now')),CHECK(percentage_tolerance IS NOT NULL OR absolute_tolerance IS NOT NULL))""")
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_match_tolerance_company_component ON three_way_match_tolerances(company_id,component,active_yn,effective_from)')
+        connection.execute("""CREATE TABLE IF NOT EXISTS invoice_items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,invoice_id INTEGER NOT NULL REFERENCES invoices(id),item_id INTEGER NOT NULL REFERENCES items(id),
+            quantity REAL NOT NULL,unit_price REAL NOT NULL,line_value REAL NOT NULL,tax REAL NOT NULL DEFAULT 0,
+            freight REAL NOT NULL DEFAULT 0,other_charges REAL NOT NULL DEFAULT 0)""")
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice_item ON invoice_items(invoice_id,item_id)')
+        approval_columns={row['name'] for row in connection.execute('PRAGMA table_info(approval_log)')}
+        for column,definition in {'approval_method':'TEXT','authority_reference':'TEXT','event_type':'TEXT','supersedes_approval_id':'INTEGER REFERENCES approval_log(id)'}.items():
+            if column not in approval_columns:connection.execute(f'ALTER TABLE approval_log ADD COLUMN {column} {definition}')
+        invoice_columns={row['name'] for row in connection.execute('PRAGMA table_info(invoices)')}
+        for column,definition in {'match_result_code':'TEXT','match_details_json':'TEXT'}.items():
+            if column not in invoice_columns:connection.execute(f'ALTER TABLE invoices ADD COLUMN {column} {definition}')
+        adjustment_columns={row['name'] for row in connection.execute('PRAGMA table_info(stock_adjustments)')}
+        for column,definition in {
+            'quantity_before':'REAL','quantity_after':'REAL','unit_cost':'REAL','total_value_impact':'REAL',
+            'detailed_remarks':'TEXT','attachment_required':'INTEGER NOT NULL DEFAULT 0','approved_at':'TEXT',
+            'authority_reference':'TEXT','approval_method':'TEXT','cycle_count_id':'INTEGER',
+            'cycle_count_item_id':'INTEGER'
+        }.items():
+            if column not in adjustment_columns:connection.execute(f'ALTER TABLE stock_adjustments ADD COLUMN {column} {definition}')
+        cycle_count_columns={row['name'] for row in connection.execute('PRAGMA table_info(cycle_counts)')}
+        for column,definition in {'submitted_by':'INTEGER REFERENCES users(id)','submitted_at':'TEXT','reviewed_by':'INTEGER REFERENCES users(id)','reviewed_at':'TEXT','review_comments':'TEXT'}.items():
+            if column not in cycle_count_columns:connection.execute(f'ALTER TABLE cycle_counts ADD COLUMN {column} {definition}')
+        cycle_sql=(connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='cycle_counts'").fetchone() or {'sql':''})['sql'] or ''
+        if "status IN ('Draft','Counted','Approved')" in cycle_sql:
+            connection.execute('PRAGMA legacy_alter_table=ON')
+            connection.execute('ALTER TABLE cycle_counts RENAME TO cycle_counts_legacy_status')
+            connection.execute("""CREATE TABLE cycle_counts(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,count_number TEXT NOT NULL UNIQUE,warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+                count_date TEXT NOT NULL DEFAULT(date('now')),status TEXT NOT NULL DEFAULT 'Draft' CHECK(status IN ('Draft','Counted','Approved','Rejected','Recount Requested','Adjustment Pending SCM Approval')),
+                created_by INTEGER REFERENCES users(id),submitted_by INTEGER REFERENCES users(id),submitted_at TEXT,reviewed_by INTEGER REFERENCES users(id),reviewed_at TEXT,review_comments TEXT)""")
+            existing={row['name'] for row in connection.execute('PRAGMA table_info(cycle_counts_legacy_status)')}
+            columns=[column for column in ('id','count_number','warehouse_id','count_date','status','created_by','submitted_by','submitted_at','reviewed_by','reviewed_at','review_comments') if column in existing]
+            connection.execute(f"INSERT INTO cycle_counts({','.join(columns)}) SELECT {','.join(columns)} FROM cycle_counts_legacy_status")
+            connection.execute('DROP TABLE cycle_counts_legacy_status')
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='cycle_count_items'").fetchone():
+                item_existing={row['name'] for row in connection.execute('PRAGMA table_info(cycle_count_items)')}
+                connection.execute('ALTER TABLE cycle_count_items RENAME TO cycle_count_items_legacy_fk')
+                connection.execute("""CREATE TABLE cycle_count_items(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,count_id INTEGER NOT NULL REFERENCES cycle_counts(id),
+                    item_id INTEGER NOT NULL REFERENCES items(id),system_qty REAL NOT NULL DEFAULT 0,counted_qty REAL,
+                    variance REAL,count_note TEXT,adjustment_id INTEGER)""")
+                item_columns=[column for column in ('id','count_id','item_id','system_qty','counted_qty','variance','count_note','adjustment_id') if column in item_existing]
+                connection.execute(f"INSERT INTO cycle_count_items({','.join(item_columns)}) SELECT {','.join(item_columns)} FROM cycle_count_items_legacy_fk")
+                connection.execute('DROP TABLE cycle_count_items_legacy_fk')
+        item_sql=(connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='cycle_count_items'").fetchone() or {'sql':''})['sql'] or ''
+        adjustment_sql=(connection.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='stock_adjustments'").fetchone() or {'sql':''})['sql'] or ''
+        if 'cycle_counts_legacy_status' in item_sql or 'cycle_counts_legacy_status' in adjustment_sql:
+            connection.execute('PRAGMA legacy_alter_table=ON')
+            if 'cycle_counts_legacy_status' in adjustment_sql:
+                adjustment_existing={row['name'] for row in connection.execute('PRAGMA table_info(stock_adjustments)')}
+                connection.execute('ALTER TABLE stock_adjustments RENAME TO stock_adjustments_legacy_cycle_fk')
+                connection.execute("""CREATE TABLE stock_adjustments(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,adjustment_number TEXT UNIQUE NOT NULL,
+                    item_id INTEGER NOT NULL REFERENCES items(id),warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+                    quantity_change REAL NOT NULL,reason TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'Pending' CHECK(status IN ('Pending','Approved','Rejected')),
+                    approved_by INTEGER REFERENCES users(id),created_by INTEGER REFERENCES users(id),
+                    adjustment_date TEXT NOT NULL DEFAULT(date('now')),location_id INTEGER,
+                    quantity_before REAL,quantity_after REAL,unit_cost REAL,total_value_impact REAL,
+                    detailed_remarks TEXT,attachment_required INTEGER NOT NULL DEFAULT 0,approved_at TEXT,
+                    authority_reference TEXT,approval_method TEXT,cycle_count_id INTEGER,cycle_count_item_id INTEGER)""")
+                adjustment_columns=[column for column in ('id','adjustment_number','item_id','warehouse_id','quantity_change','reason','status','approved_by','created_by','adjustment_date','location_id','quantity_before','quantity_after','unit_cost','total_value_impact','detailed_remarks','attachment_required','approved_at','authority_reference','approval_method','cycle_count_id','cycle_count_item_id') if column in adjustment_existing]
+                connection.execute(f"INSERT INTO stock_adjustments({','.join(adjustment_columns)}) SELECT {','.join(adjustment_columns)} FROM stock_adjustments_legacy_cycle_fk")
+                connection.execute('DROP TABLE stock_adjustments_legacy_cycle_fk')
+            if 'cycle_counts_legacy_status' in item_sql:
+                item_existing={row['name'] for row in connection.execute('PRAGMA table_info(cycle_count_items)')}
+                connection.execute('ALTER TABLE cycle_count_items RENAME TO cycle_count_items_legacy_cycle_fk')
+                connection.execute("""CREATE TABLE cycle_count_items(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,count_id INTEGER NOT NULL REFERENCES cycle_counts(id),
+                    item_id INTEGER NOT NULL REFERENCES items(id),system_qty REAL NOT NULL DEFAULT 0,
+                    counted_qty REAL,variance REAL,count_note TEXT,adjustment_id INTEGER)""")
+                item_columns=[column for column in ('id','count_id','item_id','system_qty','counted_qty','variance','count_note','adjustment_id') if column in item_existing]
+                connection.execute(f"INSERT INTO cycle_count_items({','.join(item_columns)}) SELECT {','.join(item_columns)} FROM cycle_count_items_legacy_cycle_fk")
+                connection.execute('DROP TABLE cycle_count_items_legacy_cycle_fk')
+        cycle_count_item_columns={row['name'] for row in connection.execute('PRAGMA table_info(cycle_count_items)')}
+        for column,definition in {'count_note':'TEXT','adjustment_id':'INTEGER'}.items():
+            if column not in cycle_count_item_columns:connection.execute(f'ALTER TABLE cycle_count_items ADD COLUMN {column} {definition}')
+        storekeeper_permission_rows=connection.execute("SELECT id,permission_keys FROM employees WHERE approval_role='Storekeeper' AND deleted_at IS NULL").fetchall()
+        from .permissions import defaults_for_role
+        old_storekeeper_defaults=set(defaults_for_role('Storekeeper'))-{'task.transfers'}
+        old_ui_storekeeper_defaults=old_storekeeper_defaults-{'po.view','grn.view','grn.post','issue.view','issue.post'}
+        for employee in storekeeper_permission_rows:
+            if not employee['permission_keys']:
+                continue
+            try:
+                keys=json.loads(employee['permission_keys'])
+            except (TypeError,ValueError):
+                continue
+            if not isinstance(keys,list):
+                continue
+            changed=False
+            if 'task.cycle_count' not in keys:
+                keys.append('task.cycle_count')
+                changed=True
+            if 'task.transfers' not in keys and set(keys) in (old_storekeeper_defaults,old_ui_storekeeper_defaults):
+                keys.append('task.transfers')
+                changed=True
+            if changed:
+                connection.execute('UPDATE employees SET permission_keys=? WHERE id=?',(json.dumps(keys),employee['id']))
+        transfer_columns={row['name'] for row in connection.execute('PRAGMA table_info(transfers)')}
+        for column,definition in {
+            'transaction_quantity':'REAL','transaction_uom':'TEXT','conversion_factor_used':'REAL',
+            'base_quantity':'REAL','base_uom':'TEXT','dispatched_quantity':'REAL NOT NULL DEFAULT 0',
+            'received_good_quantity':'REAL NOT NULL DEFAULT 0','damaged_quantity':'REAL NOT NULL DEFAULT 0',
+            'rejected_quantity':'REAL NOT NULL DEFAULT 0','shortage_quantity':'REAL NOT NULL DEFAULT 0',
+            'outstanding_quantity':'REAL NOT NULL DEFAULT 0','total_value':'REAL NOT NULL DEFAULT 0',
+            'closed_by':'INTEGER REFERENCES users(id)','closed_at':'TEXT',
+            'multi_item_yn':'INTEGER NOT NULL DEFAULT 0'
+        }.items():
+            if column not in transfer_columns:connection.execute(f'ALTER TABLE transfers ADD COLUMN {column} {definition}')
+        receipt_columns={row['name'] for row in connection.execute('PRAGMA table_info(transfer_receipts)')}
+        for column,definition in {
+            'physical_quantity':'REAL NOT NULL DEFAULT 0','good_quantity':'REAL NOT NULL DEFAULT 0',
+            'damaged_quantity':'REAL NOT NULL DEFAULT 0','rejected_quantity':'REAL NOT NULL DEFAULT 0',
+            'shortage_quantity':'REAL NOT NULL DEFAULT 0','unit_cost':'REAL NOT NULL DEFAULT 0',
+            'total_value':'REAL NOT NULL DEFAULT 0','receipt_status':'TEXT','remarks':'TEXT'
+        }.items():
+            if column not in receipt_columns:connection.execute(f'ALTER TABLE transfer_receipts ADD COLUMN {column} {definition}')
+        location_columns={row['name'] for row in connection.execute('PRAGMA table_info(locations)')}
+        for column,definition in {
+            'storage_classification':'TEXT','environment':'TEXT','structure_type':'TEXT',
+            'capacity_quantity':'REAL','capacity_uom':'TEXT','secure_storage':'INTEGER NOT NULL DEFAULT 0',
+            'temperature_controlled':'INTEGER NOT NULL DEFAULT 0','mixing_rule':'TEXT NOT NULL DEFAULT \'MIXED_ITEMS_ALLOWED\'',
+            'active_yn':'INTEGER NOT NULL DEFAULT 1','full_code':'TEXT'
+        }.items():
+            if column not in location_columns:connection.execute(f'ALTER TABLE locations ADD COLUMN {column} {definition}')
+        item_columns={row['name'] for row in connection.execute('PRAGMA table_info(items)')}
+        for column,definition in {
+            'storage_classification_override':'TEXT','environment_override':'TEXT','structure_type_override':'TEXT',
+            'secure_storage_required':'INTEGER NOT NULL DEFAULT 0','hazardous_storage_required':'INTEGER NOT NULL DEFAULT 0',
+            'temperature_controlled_required':'INTEGER NOT NULL DEFAULT 0'
+        }.items():
+            if column not in item_columns:connection.execute(f'ALTER TABLE items ADD COLUMN {column} {definition}')
+        connection.execute('''CREATE TABLE IF NOT EXISTS item_category_storage_rules(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,category TEXT NOT NULL,storage_classification TEXT,
+            environment TEXT,structure_type TEXT,secure_required INTEGER NOT NULL DEFAULT 0,
+            hazardous_required INTEGER NOT NULL DEFAULT 0,temperature_controlled_required INTEGER NOT NULL DEFAULT 0,
+            preferred_warehouse_id INTEGER REFERENCES warehouses(id),priority INTEGER NOT NULL DEFAULT 100,
+            active_yn INTEGER NOT NULL DEFAULT 1,created_by INTEGER REFERENCES users(id),created_at TEXT NOT NULL DEFAULT(datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT(datetime('now')))''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS putaway_recommendations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,item_id INTEGER NOT NULL REFERENCES items(id),warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+            quantity REAL NOT NULL,inventory_status TEXT NOT NULL DEFAULT 'AVAILABLE',recommended_location_id INTEGER REFERENCES locations(id),
+            selected_location_id INTEGER REFERENCES locations(id),status TEXT NOT NULL DEFAULT 'RECOMMENDED',reason TEXT,
+            override_reason TEXT,source_table TEXT,source_id INTEGER,recommended_by INTEGER REFERENCES users(id),recommended_at TEXT NOT NULL DEFAULT(datetime('now')),
+            confirmed_by INTEGER REFERENCES users(id),confirmed_at TEXT)''')
+        connection.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_locations_warehouse_code_stable ON locations(warehouse_id,code) WHERE deleted_at IS NULL')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_locations_hierarchy ON locations(warehouse_id,parent_id,type,active_yn)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_storage_rules_category_priority ON item_category_storage_rules(category,active_yn,priority)')
+        connection.execute('''CREATE TABLE IF NOT EXISTS location_code_migration_log(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,location_id INTEGER NOT NULL REFERENCES locations(id),old_code TEXT NOT NULL,new_code TEXT NOT NULL,
+            reason TEXT NOT NULL,migrated_at TEXT NOT NULL DEFAULT(datetime('now')),UNIQUE(location_id,old_code,new_code))''')
+        used_warehouse_codes={str(row['warehouse_code']).upper() for row in connection.execute("SELECT warehouse_code FROM warehouses WHERE trim(COALESCE(warehouse_code,''))<>'' AND upper(warehouse_code)<>'NONE'")}
+        warehouse_sequence=1
+        for warehouse in connection.execute("SELECT id,warehouse_code FROM warehouses WHERE trim(COALESCE(warehouse_code,''))='' OR upper(warehouse_code)='NONE' ORDER BY id").fetchall():
+            while f'WH{warehouse_sequence:02d}' in used_warehouse_codes:warehouse_sequence+=1
+            replacement=f"WH{warehouse_sequence:02d}";connection.execute('UPDATE warehouses SET warehouse_code=? WHERE id=?',(replacement,warehouse['id']));used_warehouse_codes.add(replacement);warehouse_sequence+=1
+        for location in connection.execute("SELECT l.id,l.warehouse_id,l.code,w.warehouse_code FROM locations l JOIN warehouses w ON w.id=l.warehouse_id WHERE upper(l.code) LIKE 'NONE-%'").fetchall():
+            new_code=location['warehouse_code']+location['code'][4:]
+            collision=connection.execute('SELECT id FROM locations WHERE code=? AND warehouse_id=? AND id<>?',(new_code,location['warehouse_id'],location['id'])).fetchone()
+            if not collision:
+                connection.execute("INSERT OR IGNORE INTO location_code_migration_log(location_id,old_code,new_code,reason)VALUES(?,?,?,'Replaced invalid NONE prefix while preserving the location ID and all foreign-key history')",(location['id'],location['code'],new_code));connection.execute('UPDATE locations SET code=?,full_code=? WHERE id=?',(new_code,new_code,location['id']))
+        connection.execute('''CREATE TABLE IF NOT EXISTS in_transit_inventory(
+            transfer_id INTEGER PRIMARY KEY REFERENCES transfers(id),item_id INTEGER NOT NULL REFERENCES items(id),
+            from_warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),to_warehouse_id INTEGER NOT NULL REFERENCES warehouses(id),
+            dispatched_quantity REAL NOT NULL,outstanding_quantity REAL NOT NULL,unit_cost REAL NOT NULL,total_value REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'IN_TRANSIT',dispatched_at TEXT NOT NULL DEFAULT(datetime('now')),updated_at TEXT NOT NULL DEFAULT(datetime('now')))''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS transfer_cost_allocations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,transfer_id INTEGER NOT NULL REFERENCES transfers(id),source_layer_id INTEGER,
+            dispatched_quantity REAL NOT NULL,accounted_quantity REAL NOT NULL DEFAULT 0,unit_cost REAL NOT NULL,
+            UNIQUE(transfer_id,source_layer_id))''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS transfer_items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,transfer_id INTEGER NOT NULL REFERENCES transfers(id),
+            item_id INTEGER NOT NULL REFERENCES items(id),from_location_id INTEGER NOT NULL REFERENCES locations(id),
+            to_location_id INTEGER REFERENCES locations(id),quantity REAL NOT NULL,
+            transaction_quantity REAL,transaction_uom TEXT,conversion_factor_used REAL,base_uom TEXT,
+            unit_cost REAL NOT NULL DEFAULT 0,total_value REAL NOT NULL DEFAULT 0,
+            dispatched_quantity REAL NOT NULL DEFAULT 0,received_good_quantity REAL NOT NULL DEFAULT 0,
+            damaged_quantity REAL NOT NULL DEFAULT 0,rejected_quantity REAL NOT NULL DEFAULT 0,
+            shortage_quantity REAL NOT NULL DEFAULT 0,outstanding_quantity REAL NOT NULL DEFAULT 0)''')
+        connection.execute('''INSERT INTO transfer_items(transfer_id,item_id,from_location_id,to_location_id,quantity,
+            transaction_quantity,transaction_uom,conversion_factor_used,base_uom,unit_cost,total_value,
+            dispatched_quantity,received_good_quantity,damaged_quantity,rejected_quantity,shortage_quantity,outstanding_quantity)
+            SELECT t.id,t.item_id,t.from_location_id,t.to_location_id,t.quantity,t.transaction_quantity,
+            t.transaction_uom,t.conversion_factor_used,t.base_uom,t.unit_cost,
+            COALESCE(NULLIF(t.total_value,0),t.quantity*t.unit_cost),
+            COALESCE(NULLIF(t.dispatched_quantity,0),t.quantity),t.received_good_quantity,
+            t.damaged_quantity,t.rejected_quantity,t.shortage_quantity,
+            CASE WHEN t.outstanding_quantity>0 THEN t.outstanding_quantity
+                WHEN t.status IN('In Transit','Partially Received') THEN MAX(0,t.quantity-
+                    COALESCE(t.received_good_quantity,0)-COALESCE(t.damaged_quantity,0)-
+                    COALESCE(t.rejected_quantity,0)-COALESCE(t.shortage_quantity,0))
+                ELSE 0 END FROM transfers t
+            WHERE NOT EXISTS(SELECT 1 FROM transfer_items ti WHERE ti.transfer_id=t.id)''')
+        allocation_columns={row['name'] for row in connection.execute('PRAGMA table_info(transfer_cost_allocations)')}
+        if 'transfer_item_id' not in allocation_columns:
+            connection.execute('ALTER TABLE transfer_cost_allocations ADD COLUMN transfer_item_id INTEGER REFERENCES transfer_items(id)')
+        connection.execute('''UPDATE transfer_cost_allocations SET transfer_item_id=(
+            SELECT id FROM transfer_items WHERE transfer_id=transfer_cost_allocations.transfer_id ORDER BY id LIMIT 1)
+            WHERE transfer_item_id IS NULL''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS transfer_receipt_items(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,receipt_id INTEGER NOT NULL REFERENCES transfer_receipts(id),
+            transfer_item_id INTEGER NOT NULL REFERENCES transfer_items(id),item_id INTEGER NOT NULL REFERENCES items(id),
+            location_id INTEGER NOT NULL REFERENCES locations(id),physical_quantity REAL NOT NULL DEFAULT 0,
+            good_quantity REAL NOT NULL DEFAULT 0,damaged_quantity REAL NOT NULL DEFAULT 0,
+            rejected_quantity REAL NOT NULL DEFAULT 0,shortage_quantity REAL NOT NULL DEFAULT 0,
+            unit_cost REAL NOT NULL DEFAULT 0,total_value REAL NOT NULL DEFAULT 0,
+            UNIQUE(receipt_id,transfer_item_id))''')
+        connection.execute('''INSERT INTO transfer_receipt_items(receipt_id,transfer_item_id,item_id,location_id,
+            physical_quantity,good_quantity,damaged_quantity,rejected_quantity,shortage_quantity,unit_cost,total_value)
+            SELECT r.id,ti.id,r.item_id,r.location_id,
+            CASE WHEN r.physical_quantity=0 AND r.good_quantity=0 AND r.damaged_quantity=0 AND r.rejected_quantity=0
+                THEN r.quantity_received ELSE r.physical_quantity END,
+            CASE WHEN r.physical_quantity=0 AND r.good_quantity=0 AND r.damaged_quantity=0 AND r.rejected_quantity=0
+                THEN r.quantity_received ELSE r.good_quantity END,r.damaged_quantity,
+            r.rejected_quantity,r.shortage_quantity,r.unit_cost,r.total_value FROM transfer_receipts r
+            JOIN transfer_items ti ON ti.transfer_id=r.transfer_id
+            WHERE NOT EXISTS(SELECT 1 FROM transfer_receipt_items ri WHERE ri.receipt_id=r.id)''')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_transfer_items_transfer ON transfer_items(transfer_id,id)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_transfer_receipt_items_receipt ON transfer_receipt_items(receipt_id,transfer_item_id)')
+        connection.execute('''CREATE TABLE IF NOT EXISTS transfer_shortages(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,transfer_id INTEGER NOT NULL REFERENCES transfers(id),receipt_id INTEGER NOT NULL REFERENCES transfer_receipts(id),
+            item_id INTEGER NOT NULL REFERENCES items(id),quantity REAL NOT NULL,unit_cost REAL NOT NULL,total_value REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'OPEN',remarks TEXT,recorded_by INTEGER REFERENCES users(id),recorded_at TEXT NOT NULL DEFAULT(datetime('now')),
+            resolution_type TEXT,resolution_reference TEXT,resolved_by INTEGER REFERENCES users(id),resolved_at TEXT)''')
+        shortage_columns={row['name'] for row in connection.execute('PRAGMA table_info(transfer_shortages)')}
+        if 'transfer_item_id' not in shortage_columns:
+            connection.execute('ALTER TABLE transfer_shortages ADD COLUMN transfer_item_id INTEGER REFERENCES transfer_items(id)')
+        connection.execute('''UPDATE transfer_shortages SET transfer_item_id=(
+            SELECT id FROM transfer_items WHERE transfer_id=transfer_shortages.transfer_id ORDER BY id LIMIT 1)
+            WHERE transfer_item_id IS NULL''')
+        connection.execute('''CREATE TABLE IF NOT EXISTS transfer_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,transfer_id INTEGER NOT NULL REFERENCES transfers(id),event_type TEXT NOT NULL,
+            event_data TEXT,performed_by INTEGER REFERENCES users(id),created_at TEXT NOT NULL DEFAULT(datetime('now')))''')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_transfer_receipts_transfer ON transfer_receipts(transfer_id,received_at)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_transfer_shortages_transfer_status ON transfer_shortages(transfer_id,status)')
+        # Multi-warehouse inventory queries and FIFO posting always lead with
+        # warehouse and item; these indexes keep authorization filtering in SQL.
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_inventory_stock_warehouse_item_location ON inventory_stock(warehouse_id,item_id,location_id)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_inventory_layers_warehouse_item_fifo ON inventory_layers(warehouse_id,item_id,location_id,received_date,id)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_stock_ledger_warehouse_item_date ON stock_ledger(warehouse_id,item_id,created_at)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_grn_items_warehouse_grn ON grn_items(warehouse_id,grn_id)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_material_issue_items_warehouse_issue ON material_issue_items(warehouse_id,issue_id)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_transfers_source_destination ON transfers(from_warehouse_id,to_warehouse_id,transfer_date)')
+        connection.execute('CREATE INDEX IF NOT EXISTS idx_stock_adjustments_warehouse_date ON stock_adjustments(warehouse_id,adjustment_date)')
+        connection.execute("""CREATE TABLE IF NOT EXISTS warehouse_migration_issues(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,issue_key TEXT NOT NULL UNIQUE,table_name TEXT NOT NULL,
+            record_id INTEGER NOT NULL,column_name TEXT NOT NULL,issue_type TEXT NOT NULL,
+            details TEXT,status TEXT NOT NULL DEFAULT 'OPEN',detected_at TEXT NOT NULL DEFAULT(datetime('now')),
+            resolved_at TEXT,resolved_by INTEGER REFERENCES users(id))""")
+        # Legacy rows are flagged for controlled review. Warehouse assignments
+        # are never guessed or silently backfilled.
+        for table,column in [('inventory_stock','warehouse_id'),('inventory_layers','warehouse_id'),('stock_ledger','warehouse_id'),('grn_items','warehouse_id'),('material_issue_items','warehouse_id'),('returns','warehouse_id'),('stock_adjustments','warehouse_id'),('tools','warehouse_id')]:
+            columns={row['name']for row in connection.execute(f'PRAGMA table_info({table})')}
+            if column not in columns:continue
+            for row in connection.execute(f'SELECT id FROM {table} WHERE {column} IS NULL').fetchall():
+                key=f'{table}:{row["id"]}:{column}:missing'
+                connection.execute('INSERT OR IGNORE INTO warehouse_migration_issues(issue_key,table_name,record_id,column_name,issue_type,details)VALUES(?,?,?,?,?,?)',(key,table,row['id'],column,'MISSING_WAREHOUSE','Warehouse could not be derived safely; administrator review is required'))
+        for table in ['inventory_stock','inventory_layers','stock_ledger','grn_items','material_issue_items','returns','stock_adjustments']:
+            columns={row['name']for row in connection.execute(f'PRAGMA table_info({table})')}
+            if not {'warehouse_id','location_id'}<=columns:continue
+            for row in connection.execute(f'''SELECT x.id FROM {table} x JOIN locations l ON l.id=x.location_id
+              WHERE x.location_id IS NOT NULL AND x.warehouse_id<>l.warehouse_id''').fetchall():
+                key=f'{table}:{row["id"]}:location_id:mismatch'
+                connection.execute('INSERT OR IGNORE INTO warehouse_migration_issues(issue_key,table_name,record_id,column_name,issue_type,details)VALUES(?,?,?,?,?,?)',(key,table,row['id'],'location_id','WAREHOUSE_LOCATION_MISMATCH','Location belongs to a different warehouse; administrator review is required'))
+    from .pr_schema import ensure_pr_workflow_schema
+    ensure_pr_workflow_schema()
     with connect() as connection:
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")

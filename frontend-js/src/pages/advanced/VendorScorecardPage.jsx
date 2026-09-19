@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import client from '../../api/client';
 import DataTable from '../../components/DataTable';
+import useAutoRefresh from '../../hooks/useAutoRefresh';
 
 export default function VendorScorecardPage() {
   const [scores, setScores] = useState([]);
   const [loading, setLoading] = useState(true);
   const load = () => { setLoading(true); client.get('/advanced/vendor-scorecards').then(result => setScores(result.data)).finally(() => setLoading(false)); };
+  useAutoRefresh(load);
   useEffect(load, []);
   return <div>
     <div className="mb-4 flex items-end justify-between"><div><h1 className="text-xl font-semibold text-slate-900">Vendor Performance Scorecard</h1><p className="text-sm text-slate-500">Automatically calculated from receipt timeliness, accepted quantity, rejection, and quality outcomes.</p></div><button className="btn-secondary" onClick={load}>Refresh Scores</button></div>

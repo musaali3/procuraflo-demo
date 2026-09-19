@@ -1,9 +1,11 @@
+import GRNReceiptForm from '../../components/GRNReceiptForm';
+import DocumentCopyActions from '../../components/DocumentCopyActions';
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import client from "../../api/client";
 import DataTable from "../../components/DataTable";
 import Modal from "../../components/Modal";
-import { currencyFieldLabel, formatCurrency } from "../../utils/currency";
+import { formatCurrency } from "../../utils/currency";
 import DocumentAttachments from "../../components/DocumentAttachments";
 import { useAuth } from "../../contexts/AuthContext";
 import ProfessionalGoodsReceiptNote from "../../components/ProfessionalGoodsReceiptNote";
@@ -11,13 +13,13 @@ import StatusBadge from "../../components/StatusBadge";
 import {
   COMPANY_COPY,
   GRN_VENDOR_COPY,
-  printControlledCopies,
 } from "../../utils/printCopies";
 import { downloadElementPdf } from "../../utils/downloadPdf";
-import SearchSelect from "../../components/SearchSelect";
-import EmployeePicker from "../../components/EmployeePicker";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 export default function GRNPage() {
   const { user } = useAuth();
+  const receiptRequest = useRef(null);
+  const receiptStorageKey = `procuraflo:pending-grn:${localStorage.getItem('procuraflow_company_key') || 'default'}`;
   const authorizedWarehouseIds = (user?.warehouse_ids || []).map(Number);
   const singleWarehouseId =
     authorizedWarehouseIds.length === 1 ? authorizedWarehouseIds[0] : "";
@@ -59,6 +61,7 @@ export default function GRNPage() {
   function load() {
     client.get("/warehouse/grns").then((res) => setGrns(res.data));
   }
+  useAutoRefresh(load);
   useEffect(() => {
     load();
     client
@@ -67,7 +70,7 @@ export default function GRNPage() {
         setPos(
           res.data.filter(
             (p) =>
-              ["Approved", "Printed"].includes(p.status) &&
+              ["Approved", "Printed", "Partially Received"].includes(p.status) &&
               !Number(p.fully_received),
           ),
         ),
@@ -111,6 +114,13 @@ export default function GRNPage() {
       setLines([]);
       return;
     }
+    const selected = pos.find((entry) => Number(entry.id) === selectedId);
+    if (!receivingWarehouseId || !authorizedWarehouseIds.includes(Number(receivingWarehouseId)) ||
+        Number(selected?.intended_delivery_warehouse_id) !== Number(receivingWarehouseId)) {
+      setPoId("");
+      setLines([]);
+      return setError("Select a PO assigned to the receiving warehouse.");
+    }
     try {
       const po = (await client.get(`/procurement/pos/${selectedId}`)).data;
       const outstandingLines = po.items
@@ -142,7 +152,7 @@ export default function GRNPage() {
         });
       setLines(outstandingLines);
       if (!outstandingLines.length)
-        setError("All items on this PO have already been fully received.");
+        setError("No quantity is currently due for delivery. Check PO Receiving Issues / Partial Receipt Details: remaining stock may still require inspection or put-away.");
     } catch (e) {
       setLines([]);
       setError(e?.response?.data?.error || "Unable to load PO items");
@@ -152,9 +162,13 @@ export default function GRNPage() {
     try {
       if (!receivingWarehouseId)
         return setError("Select the receiving warehouse.");
+      if (!authorizedWarehouseIds.includes(Number(receivingWarehouseId)) ||
+          !pos.some((entry) => Number(entry.id) === Number(poId) &&
+            Number(entry.intended_delivery_warehouse_id) === Number(receivingWarehouseId)))
+        return setError("Select a PO assigned to your receiving warehouse.");
       if (!receivedForEmployeeId)
         return setError("Select the employee responsible for this receipt.");
-      await client.post("/warehouse/grns", {
+      const receiptBody = {
         po_id: poId,
         delivery_note: deliveryNote,
         warehouse_id: receivingWarehouseId,
@@ -162,8 +176,16 @@ export default function GRNPage() {
         items: lines.map((line) => ({
           ...line,
           warehouse_id: receivingWarehouseId,
+          location_id: null,
         })),
-      });
+      };
+      const fingerprint = JSON.stringify(receiptBody);
+      if (!receiptRequest.current) { try { receiptRequest.current = JSON.parse(sessionStorage.getItem(receiptStorageKey)); } catch { /* Retain the in-memory retry key if storage is unavailable. */ } }
+      if (receiptRequest.current?.fingerprint !== fingerprint) receiptRequest.current = { fingerprint, key: crypto.randomUUID() };
+      try { sessionStorage.setItem(receiptStorageKey, JSON.stringify(receiptRequest.current)); } catch { /* In-memory retries remain protected. */ }
+      await client.post("/warehouse/grns", { ...receiptBody, request_key: receiptRequest.current.key });
+      try { sessionStorage.removeItem(receiptStorageKey); } catch { /* Successful request is already recorded by the backend. */ }
+      receiptRequest.current = null;
       setShowForm(false);
       setPoId("");
       setDeliveryNote("");
@@ -253,489 +275,15 @@ export default function GRNPage() {
           title: "New GRN",
           onClose: () => setShowForm(false),
           wide: true,
-          children: _jsxs("div", {
-            className: "compact-form",
-            children: [
-              _jsxs("div", {
-                className: "form-section-tinted",
-                children: [
-                  _jsx("h3", {
-                    className: "form-section-title",
-                    children: "GRN Header",
-                  }),
-                  _jsxs("div", {
-                    className: "grid gap-3 md:grid-cols-2 xl:grid-cols-4",
-                    children: [
-                      _jsx(SearchSelect, {
-                        label: "Purchase Order",
-                        options: pos.map((p) => ({
-                          value: p.id,
-                          label: `${p.po_number} — ${p.supplier_name}${p.committed_delivery_date ? ` — Due ${p.committed_delivery_date}` : ""}`,
-                        })),
-                        value: poId,
-                        onChange: selectPurchaseOrder,
-                        placeholder: "Search PO",
-                      }),
-                      _jsxs("div", {
-                        children: [
-                          _jsx("label", {
-                            className: "text-sm font-medium text-slate-700",
-                            children: "Receiving Warehouse",
-                          }),
-                          authorizedWarehouseIds.length === 1
-                            ? _jsx("div", {
-                                className:
-                                  "input mt-1 bg-slate-100 text-slate-700",
-                                children:
-                                  locations.find(
-                                    (location) =>
-                                      Number(location.warehouse_id) ===
-                                      Number(singleWarehouseId),
-                                  )?.warehouse_name ||
-                                  user?.warehouse_name ||
-                                  "Assigned warehouse",
-                              })
-                            : _jsxs("select", {
-                                className: "input mt-1",
-                                value: receivingWarehouseId,
-                                onChange: (event) => {
-                                  const id = Number(event.target.value) || "";
-                                  setReceivingWarehouseId(id);
-                                  setLines((current) =>
-                                    current.map((line) => ({
-                                      ...line,
-                                      warehouse_id: id,
-                                      location_id: "",
-                                    })),
-                                  );
-                                },
-                                children: [
-                                  _jsx("option", {
-                                    value: "",
-                                    children: "Select authorized warehouse...",
-                                  }),
-                                  Array.from(
-                                    new Map(
-                                      locations.map((location) => [
-                                        Number(location.warehouse_id),
-                                        {
-                                          id: Number(location.warehouse_id),
-                                          name: location.warehouse_name,
-                                        },
-                                      ]),
-                                    ).values(),
-                                  ).map((warehouse) =>
-                                    _jsx(
-                                      "option",
-                                      {
-                                        value: warehouse.id,
-                                        children: warehouse.name,
-                                      },
-                                      warehouse.id,
-                                    ),
-                                  ),
-                                ],
-                              }),
-                          _jsx("p", {
-                            className: "mt-1 text-xs text-slate-500",
-                            children:
-                              "Controlled by the employee's active warehouse responsibility.",
-                          }),
-                        ],
-                      }),
-                      _jsxs("div", {
-                        children: [
-                          _jsx("label", {
-                            className: "text-sm font-medium text-slate-700",
-                            children: "Delivery Note",
-                          }),
-                          _jsx("input", {
-                            className: "input mt-1",
-                            value: deliveryNote,
-                            onChange: (e) => setDeliveryNote(e.target.value),
-                          }),
-                        ],
-                      }),
-                      _jsx(EmployeePicker, {
-                        label: "Employee responsible for receipt",
-                        employees: receivingEmployees,
-                        departments: departments,
-                        value: receivedForEmployeeId,
-                        onChange: (value) =>
-                          setReceivedForEmployeeId(value ? Number(value) : ""),
-                        onCreated: (employee) =>
-                          setEmployees((current) => [...current, employee]),
-                      }),
-                    ],
-                  }),
-                ],
-              }),
-              _jsxs("div", {
-                className: "form-section",
-                children: [
-                  _jsx("h3", {
-                    className: "font-medium text-slate-800 mb-1",
-                    children: "Items Received",
-                  }),
-                  _jsx("p", {
-                    className: "mb-3 text-xs text-slate-500",
-                    children:
-                      "Items and outstanding quantities are filled automatically from the selected PO. Enter the actual received and inspection quantities.",
-                  }),
-                  _jsx("div", {
-                    className: "space-y-3 mt-1",
-                    children: lines.map((line, i) =>
-                      _jsxs(
-                        "div",
-                        {
-                          className: "form-line-card space-y-2",
-                          children: [
-                            _jsxs("div", {
-                              className: "grid grid-cols-12 gap-2 items-center",
-                              children: [
-                                _jsxs("div", {
-                                  className: "col-span-5",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children: "PO Item",
-                                    }),
-                                    _jsxs("div", {
-                                      className: "input mt-1 bg-slate-50",
-                                      children: [
-                                        _jsx("strong", {
-                                          children: line.item_code,
-                                        }),
-                                        " - ",
-                                        line.description,
-                                        " ",
-                                        _jsxs("span", {
-                                          className: "text-slate-500",
-                                          children: ["(", line.uom, ")"],
-                                        }),
-                                      ],
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-2",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children:
-                                        currencyFieldLabel("PO Unit Cost"),
-                                    }),
-                                    _jsx("div", {
-                                      className:
-                                        "input mt-1 bg-slate-100 text-right font-semibold tabular-nums",
-                                      children: formatCurrency(line.unit_cost),
-                                    }),
-                                    _jsx("div", {
-                                      className:
-                                        "mt-1 text-right text-[10px] text-slate-500",
-                                      children: "Locked from approved PO",
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children: "Batch Number",
-                                    }),
-                                    _jsx("input", {
-                                      className: "input mt-1",
-                                      placeholder: "Batch",
-                                      value: line.batch,
-                                      onChange: (e) =>
-                                        updateLine(i, "batch", e.target.value),
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-2",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children: "Expiry Date",
-                                    }),
-                                    _jsx("input", {
-                                      className: "input mt-1",
-                                      type: "date",
-                                      value: line.expiry_date,
-                                      onChange: (e) =>
-                                        updateLine(
-                                          i,
-                                          "expiry_date",
-                                          e.target.value,
-                                        ),
-                                    }),
-                                  ],
-                                }),
-                              ],
-                            }),
-                            _jsxs("div", {
-                              className: "grid grid-cols-12 gap-2",
-                              children: [
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children: "PO Tax",
-                                    }),
-                                    _jsxs("div", {
-                                      className:
-                                        "input mt-1 bg-slate-100 text-right font-semibold tabular-nums",
-                                      children: [
-                                        Number(line.tax || 0).toLocaleString(
-                                          undefined,
-                                          { maximumFractionDigits: 2 },
-                                        ),
-                                        "%",
-                                      ],
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children: "Accepted Net Value",
-                                    }),
-                                    _jsx("div", {
-                                      className:
-                                        "input mt-1 bg-slate-100 text-right font-semibold tabular-nums",
-                                      children: formatCurrency(
-                                        Number(line.accepted_qty || 0) *
-                                          Number(line.unit_cost || 0),
-                                      ),
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children: "Accepted Tax",
-                                    }),
-                                    _jsx("div", {
-                                      className:
-                                        "input mt-1 bg-slate-100 text-right font-semibold tabular-nums",
-                                      children: formatCurrency(
-                                        (Number(line.accepted_qty || 0) *
-                                          Number(line.unit_cost || 0) *
-                                          Number(line.tax || 0)) /
-                                          100,
-                                      ),
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs font-medium",
-                                      children: "Accepted Gross Value",
-                                    }),
-                                    _jsx("div", {
-                                      className:
-                                        "input mt-1 bg-indigo-50 text-right font-semibold tabular-nums",
-                                      children: formatCurrency(
-                                        Number(line.accepted_qty || 0) *
-                                          Number(line.unit_cost || 0) *
-                                          (1 + Number(line.tax || 0) / 100),
-                                      ),
-                                    }),
-                                  ],
-                                }),
-                              ],
-                            }),
-                            _jsxs("div", {
-                              children: [
-                                _jsx("label", {
-                                  className:
-                                    "text-xs font-medium text-slate-700",
-                                  children: "Put-away Storage Bin",
-                                }),
-                                _jsxs("select", {
-                                  className: "input mt-1",
-                                  value: line.location_id || "",
-                                  onChange: (e) =>
-                                    updateLine(
-                                      i,
-                                      "location_id",
-                                      Number(e.target.value),
-                                    ),
-                                  children: [
-                                    _jsx("option", {
-                                      value: "",
-                                      children: "Select the physical Bin...",
-                                    }),
-                                    locations
-                                      .filter(
-                                        (l) =>
-                                          l.type === "Bin" &&
-                                          Number(l.warehouse_id) ===
-                                            Number(receivingWarehouseId),
-                                      )
-                                      .map((l) =>
-                                        _jsxs(
-                                          "option",
-                                          {
-                                            value: l.id,
-                                            children: [
-                                              l.code,
-                                              l.label ? ` — ${l.label}` : "",
-                                            ],
-                                          },
-                                          l.id,
-                                        ),
-                                      ),
-                                  ],
-                                }),
-                                _jsx("p", {
-                                  className: "mt-1 text-[11px] text-slate-500",
-                                  children:
-                                    "This generated Bin ID is recorded on the GRN, FIFO layer, stock card and future issues.",
-                                }),
-                                line.recommended_location_code && _jsxs("p", {
-                                  className: "mt-1 rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700",
-                                  children: ["Recommended from the item's latest recorded location: ", line.recommended_location_code, ". You may select another authorized Bin."],
-                                }),
-                              ],
-                            }),
-                            _jsxs("div", {
-                              className: "grid grid-cols-12 gap-2 items-center",
-                              children: [
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsxs("label", {
-                                      className: "text-xs text-slate-500",
-                                      children: [
-                                        "Qty Received (",
-                                        line.uom,
-                                        ")",
-                                      ],
-                                    }),
-                                    _jsx("input", {
-                                      className: "input",
-                                      type: "number",
-                                      min: "0",
-                                      max: line.outstanding_qty,
-                                      value: line.quantity_received,
-                                      onChange: (e) =>
-                                        updateLine(
-                                          i,
-                                          "quantity_received",
-                                          Number(e.target.value),
-                                        ),
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs text-slate-500",
-                                      children: "Accepted Qty",
-                                    }),
-                                    _jsx("input", {
-                                      className: "input",
-                                      type: "number",
-                                      value: line.accepted_qty,
-                                      onChange: (e) =>
-                                        updateLine(
-                                          i,
-                                          "accepted_qty",
-                                          Number(e.target.value),
-                                        ),
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs text-slate-500",
-                                      children: "Rejected Qty",
-                                    }),
-                                    _jsx("input", {
-                                      className: "input",
-                                      type: "number",
-                                      value: line.rejected_qty,
-                                      onChange: (e) =>
-                                        updateLine(
-                                          i,
-                                          "rejected_qty",
-                                          Number(e.target.value),
-                                        ),
-                                    }),
-                                  ],
-                                }),
-                                _jsxs("div", {
-                                  className: "col-span-3",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-xs text-slate-500",
-                                      children: "Rejection Reason",
-                                    }),
-                                    _jsx("input", {
-                                      className: "input",
-                                      value: line.rejection_reason,
-                                      onChange: (e) =>
-                                        updateLine(
-                                          i,
-                                          "rejection_reason",
-                                          e.target.value,
-                                        ),
-                                      disabled: !line.rejected_qty,
-                                    }),
-                                  ],
-                                }),
-                              ],
-                            }),
-                          ],
-                        },
-                        i,
-                      ),
-                    ),
-                  }),
-                  !poId &&
-                    _jsx("div", {
-                      className:
-                        "rounded-lg bg-amber-50 px-3 py-3 text-sm text-amber-800",
-                      children: "Select a purchase order to load its items.",
-                    }),
-                ],
-              }),
-              error &&
-                _jsx("div", {
-                  className:
-                    "text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2",
-                  children: error,
-                }),
-              _jsxs("div", {
-                className: "flex justify-end gap-2 pt-2",
-                children: [
-                  _jsx("button", {
-                    className: "btn-secondary",
-                    onClick: () => setShowForm(false),
-                    children: "Cancel",
-                  }),
-                  _jsx("button", {
-                    className: "btn-primary",
-                    disabled: !receivingWarehouseId || !poId || !lines.length,
-                    onClick: submit,
-                    children: "Post GRN",
-                  }),
-                ],
-              }),
-            ],
+          children: _jsx(GRNReceiptForm, {
+            pos: pos.filter((entry) => receivingWarehouseId &&
+              authorizedWarehouseIds.includes(Number(receivingWarehouseId)) &&
+              Number(entry.intended_delivery_warehouse_id) === Number(receivingWarehouseId)),
+            poId, selectPurchaseOrder, locations, receivingWarehouseId,
+            authorizedWarehouseIds, singleWarehouseId, user, setReceivingWarehouseId,
+            setLines, receivingEmployees, departments, receivedForEmployeeId,
+            setReceivedForEmployeeId, setEmployees, deliveryNote, setDeliveryNote,
+            lines, items, updateLine, error, onCancel: () => setShowForm(false), submit,
           }),
         }),
       viewing &&
@@ -749,25 +297,7 @@ export default function GRNPage() {
               _jsxs("div", {
                 className: "flex justify-end gap-2 print:hidden",
                 children: [
-                  _jsx("button", {
-                    className: "btn-secondary",
-                    onClick: () =>
-                      downloadElementPdf(
-                        "grn-print-document",
-                        viewing.grn_number,
-                        { copies: [COMPANY_COPY, GRN_VENDOR_COPY] },
-                      ),
-                    children: "Download Two-Copy PDF",
-                  }),
-                  _jsx("button", {
-                    className: "btn-primary",
-                    onClick: () =>
-                      printControlledCopies(
-                        "grn-print-document",
-                        GRN_VENDOR_COPY,
-                      ),
-                    children: "Print Company + Vendor Copies",
-                  }),
+                  _jsx(DocumentCopyActions, { documentId: "grn-print-document", filename: viewing.grn_number, copies: [{...COMPANY_COPY,label:'Company Record'},{...GRN_VENDOR_COPY,label:'Supplier Record'}] }),
                 ],
               }),
               _jsx(ProfessionalGoodsReceiptNote, { grn: viewing }),

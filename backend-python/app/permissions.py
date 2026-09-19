@@ -8,7 +8,7 @@ ROLE_DEFAULTS = {
     'PurchaseOfficer': ['task.pr','task.rfq','task.po','task.invoices','task.suppliers','task.items','po.view','po.create','po.edit','po.approve','po.reject','po.print','vendor.view','vendor.create','vendor.edit','report.procurement'],
     'WarehouseManager': ['task.pr','task.po','task.grn','task.material_issue','task.returns','task.transfers','task.adjustments','task.inventory','task.cycle_count','task.tools','task.employees','task.warehouses','po.view','grn.view','grn.post','issue.view','issue.post','adjustment.view','adjustment.create','adjustment.approve','report.inventory','report.warehouse','report.employee','report.tools'],
     'WarehouseSupervisor': ['task.pr','task.po','task.grn','task.material_issue','task.returns','task.transfers','task.adjustments','task.inventory','task.cycle_count','task.tools','task.warehouses','po.view','grn.view','grn.post','issue.view','issue.post','adjustment.view','adjustment.create','report.inventory','report.warehouse','report.employee','report.tools'],
-    'Storekeeper': ['task.pr','task.po','task.grn','task.material_issue','task.returns','task.inventory','task.tools','po.view','grn.view','grn.post','issue.view','issue.post','report.inventory','report.warehouse','report.employee','report.tools'],
+    'Storekeeper': ['task.pr','task.po','task.grn','task.material_issue','task.returns','task.transfers','task.inventory','task.cycle_count','task.tools','po.view','grn.view','grn.post','issue.view','issue.post','report.inventory','report.warehouse','report.employee','report.tools'],
     'Helper': [],
 }
 

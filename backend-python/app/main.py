@@ -26,13 +26,17 @@ from .routes.warehouse import router as warehouse_router
 from .routes.settings import router as settings_router
 from .routes.workforce import router as workforce_router
 from .routes.controls import router as controls_router
+from .routes.clearance import router as clearance_router
 from .backup_service import scheduler_loop
-from .tenancy import tenant_record
+from .tenancy import migrate_registered_tenants, tenant_record
 from .database import reset_database, use_database
+from .security import decode_token
 from .storage import upload_path
 import jwt
 
-app = FastAPI(title="ProcuraFlow", description="Precast Supply Chain Control System", docs_url=None, redoc_url=None)
+migrate_registered_tenants()
+
+app = FastAPI(title="Procuraflo", description="Supply Chain Control System", docs_url=None, redoc_url=None)
 LOGO_DIRECTORY = upload_path('logos')
 app.mount('/uploads/logos', StaticFiles(directory=LOGO_DIRECTORY), name='company-logos')
 
@@ -65,14 +69,15 @@ app.include_router(warehouse_router)
 app.include_router(settings_router)
 app.include_router(workforce_router)
 app.include_router(controls_router)
+app.include_router(clearance_router)
 
 @app.middleware("http")
 async def tenant_database_boundary(request:Request,call_next):
     header_key=str(request.headers.get('x-company-key')or'').strip().lower();token_key=''
     authorization=str(request.headers.get('authorization')or'')
     if authorization.lower().startswith('bearer '):
-        try:token_key=str(jwt.decode(authorization.split(' ',1)[1],options={'verify_signature':False}).get('tenant_key')or'').lower()
-        except jwt.PyJWTError:token_key=''
+        try:token_key=str(decode_token(authorization.split(' ',1)[1]).get('tenant_key')or'').lower()
+        except jwt.PyJWTError:return JSONResponse({'error':'Invalid or expired token'},401)
     if header_key and token_key and header_key!=token_key:return JSONResponse({'error':'Session company does not match the requested company'},401)
     key=token_key or header_key;context_token=None
     if key:
@@ -90,7 +95,7 @@ async def security_headers(request: Request, call_next):
                      for host in os.getenv("LICENSED_HOSTNAMES", "").split(",") if host.strip()]
     actual_host = request.headers.get("host", "").lower()
     if allowed_hosts and actual_host not in allowed_hosts:
-        return JSONResponse({"error": "This ProcuraFlow installation is not licensed for this host."}, 403)
+        return JSONResponse({"error": "This Procuraflo installation is not licensed for this host."}, 403)
     public_write_paths = {'/api/auth/login','/api/auth/register-company','/api/settings/maintenance/status'}
     if request.method not in {'GET','HEAD','OPTIONS'} and request.url.path not in public_write_paths:
         from .database import fetch_one
@@ -107,7 +112,7 @@ async def security_headers(request: Request, call_next):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "system": "ProcuraFlow", "description": "Precast Supply Chain Control System"}
+    return {"status": "ok", "system": "Procuraflo", "description": "Supply Chain Control System"}
 
 @app.on_event('startup')
 async def start_month_end_scheduler():

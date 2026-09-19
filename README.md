@@ -1,6 +1,6 @@
-# ProcuraFlow Professional Edition
+# Procuraflo Professional Edition
 
-ProcuraFlow is a role-controlled procurement, warehouse, inventory, employee-accountability, supplier-performance, and audit management application. It connects PR, sourcing, PO approval, goods receipt, FIFO inventory, material issue, returns, transfers, cycle counting, three-way verification, dashboards, and executive reporting in one controlled workflow.
+Procuraflo is a role-controlled procurement, warehouse, inventory, employee-accountability, supplier-performance, and audit management application. It connects PR, sourcing, PO approval, goods receipt, FIFO inventory, material issue, returns, transfers, cycle counting, three-way verification, dashboards, and executive reporting in one controlled workflow.
 
 ## Technology
 
@@ -13,6 +13,16 @@ ProcuraFlow is a role-controlled procurement, warehouse, inventory, employee-acc
 Prerequisites: Python 3.13 and Node.js 18 or later.
 
 Backend:
+
+From the outer `procuraflow-demo` workspace folder, start the configured backend with:
+
+```powershell
+.\ProcuraFlow\backend-python\run.ps1
+```
+
+The launcher resolves the backend directory automatically and defaults to port `8001` (override with `$env:PORT`). Running `uvicorn app.main:app` directly from the outer workspace fails with `ModuleNotFoundError: No module named 'app'` because the `app` package is inside `ProcuraFlow/backend-python`.
+
+For first-time setup, run these commands from the `ProcuraFlow` folder:
 
 ```powershell
 cd backend-python
@@ -29,7 +39,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. Sign in with an active employee login created through Employee Master Data. ProcuraFlow does not publish demo-account hints on the login screen or in this release guide.
+Open `http://localhost:5174`. On a new installation, register the company and administrator account first. After setup, sign in with the company login ID and an active employee login created through Employee Master Data. Procuraflo does not publish demo-account hints on the login screen or in this release guide.
 
 ## Release verification
 
@@ -108,3 +118,9 @@ Before deployment:
 - Partial receipt tracking and automatic PO closure only after full accepted receipt
 - Company-controlled currency, fiscal year, identity, logo, document branding, and report output
 - Password expiry, temporary lock, access restoration, activity monitoring, backup, restore staging, and fiscal close controls
+
+## Stock Replenishment Check
+
+Use **Warehouse > Stock Replenishment Check** to run a manual warehouse stock review. The check considers available stock, open PRs, outstanding POs, and receipts awaiting inspection or put-away. Review quantities and adjustment reasons, complete review, and revalidate before selecting **Create PR**. This creates a normal draft for explicit submission and Procurement approval. A check record is saved only when an item is below minimum stock and existing supply leaves an uncovered shortage. Otherwise, the screen explains that replenishment is not required and no check record is created.
+
+There is no scheduled or automatic PR generation. The former run-now endpoint and scheduling settings have been removed. Existing PRs and their audit history remain available; legacy replenishment tables are retained only for historical references. Reports use `stock-replenishment-lines` and `stock-replenishment-history`.

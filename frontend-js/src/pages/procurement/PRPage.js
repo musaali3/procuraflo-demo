@@ -1,3 +1,4 @@
+import ProcurementPRReview from '../../components/ProcurementPRReview';
 import {
   jsx as _jsx,
   jsxs as _jsxs,
@@ -16,6 +17,7 @@ import { printElement } from "../../utils/printCopies";
 import { useSearchParams } from "react-router-dom";
 import SearchSelect from "../../components/SearchSelect";
 import EmployeePicker from "../../components/EmployeePicker";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 function LegacySearchSelect({ label, options, value, onChange, placeholder }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -35,7 +37,7 @@ function LegacySearchSelect({ label, options, value, onChange, placeholder }) {
         className: "text-sm font-medium text-slate-700",
         children: label,
       }),
-      _jsx("input", {
+      _jsx("input", {"data-field": "query",
         className: "input mt-1 w-full",
         placeholder: placeholder,
         value: query,
@@ -76,6 +78,9 @@ export default function PRPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const [rows, setRows] = useState([]);
+  const [reviewing,setReviewing]=useState(null);
+  const [warehouses,setWarehouses]=useState([]);
+  const [warehouseId,setWarehouseId]=useState("");
   const [items, setItems] = useState([]);
   const [depts, setDepts] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -95,11 +100,19 @@ export default function PRPage() {
   const [viewing, setViewing] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [createdPrNumber, setCreatedPrNumber] = useState("");
-  function load() {
-    client.get("/procurement/prs").then((res) => setRows(res.data));
+  function canSeePr(row) {
+    if (!['Storekeeper', 'WarehouseSupervisor', 'WarehouseManager'].includes(user?.role)) return true;
+    const authorized = new Set((user?.warehouse_ids || []).map(Number));
+    const linked = row?.warehouse_scope_ids || (row?.trigger_warehouse_id ? [row.trigger_warehouse_id] : []);
+    return linked.some((id) => authorized.has(Number(id)));
   }
+  function load() {
+    client.get("/procurement/prs").then((res) => setRows(res.data.filter(canSeePr)));
+  }
+  useAutoRefresh(load);
   useEffect(() => {
     load();
+    client.get("/masters/warehouses").then(({data})=>{setWarehouses(data);if(data.length===1)setWarehouseId(data[0].id);});
     client
       .get("/masters/items")
       .then((res) => setItems(res.data.filter((i) => i.active_yn !== 0)));
@@ -151,6 +164,7 @@ export default function PRPage() {
   async function submit() {
     setError("");
     if (
+      !warehouseId ||
       !departmentId ||
       !requestorEmployeeId ||
       lines.some(
@@ -168,12 +182,14 @@ export default function PRPage() {
     try {
       if (editingId)
         await client.put(`/procurement/prs/${editingId}`, {
+          warehouse_id: Number(warehouseId),
           department_id: departmentId,
           requestor_employee_id: Number(requestorEmployeeId),
           items: lines,
         });
       else {
         const response = await client.post("/procurement/prs", {
+          warehouse_id: Number(warehouseId),
           department_id: departmentId,
           requestor_employee_id: Number(requestorEmployeeId),
           items: lines,
@@ -199,6 +215,7 @@ export default function PRPage() {
     }
   }
   async function setStatus(id, status) {
+    if (!canSeePr(rows.find((row) => row.id === id))) return setError('PR is outside your authorized warehouse scope.');
     try {
       await client.put(`/procurement/prs/${id}/status`, { status });
       load();
@@ -209,6 +226,7 @@ export default function PRPage() {
     }
   }
   async function viewPr(row) {
+    if (!canSeePr(row)) return setError('PR is outside your authorized warehouse scope.');
     try {
       setViewing({
         ...row,
@@ -218,10 +236,16 @@ export default function PRPage() {
       setError(e?.response?.data?.error || "Unable to view PR");
     }
   }
+  async function reviewPr(row) {
+    if (!canSeePr(row)) return setError('PR is outside your authorized warehouse scope.');
+    try {setReviewing((await client.get(`/procurement/prs/${row.id}`)).data);} catch(e){setError(e?.response?.data?.error || "Unable to open review");}
+  }
   async function editPr(row) {
+    if (!canSeePr(row)) return setError('PR is outside your authorized warehouse scope.');
     try {
       const detail = (await client.get(`/procurement/prs/${row.id}`)).data;
-      setEditingId(row.id);
+      setEditingId(row.id);setError("");
+      setWarehouseId(detail.trigger_warehouse_id || "");
       setDepartmentId(detail.department_id);
       setRequestorEmployeeId(detail.business_requestor_employee_id || "");
       setLines(detail.items);
@@ -230,18 +254,9 @@ export default function PRPage() {
       setError(e?.response?.data?.error || "Unable to edit PR");
     }
   }
-  const canCreate =
-    !!user &&
-    [
-      "SupplyChainManager",
-      "PurchaseManager",
-      "PurchaseOfficer",
-      "WarehouseManager",
-      "WarehouseSupervisor",
-      "Storekeeper",
-    ].includes(user.role);
+  const canCreate = Boolean(user);
   const canApprove =
-    !!user && ["PurchaseOfficer", "PurchaseManager", "WarehouseManager", "WarehouseSupervisor", "Storekeeper", "SupplyChainManager"].includes(user.role);
+    !!user && ["PurchaseOfficer", "PurchaseManager", "SupplyChainManager"].includes(user.role);
   const canCloseBalance =
     !!user &&
     ["PurchaseOfficer", "PurchaseManager", "SupplyChainManager"].includes(
@@ -282,33 +297,24 @@ export default function PRPage() {
           columns: [
             { key: "pr_number", label: "PR Number" },
             { key: "department_name", label: "Department" },
+            { key: "warehouse_name", label: "Warehouse", render: (r) => [r.warehouse_code, r.warehouse_name].filter(Boolean).join(" ? ") || "?" },
             { key: "requestor_name", label: "Requestor" },
             {
-              key: "auto_generated",
+              key: "source_label",
               label: "Source",
-              render: (r) =>
-                r.auto_generated
-                  ? _jsx("span", {
-                      className:
-                        "rounded-full bg-cyan-100 px-2 py-1 text-xs font-semibold text-cyan-800",
-                      children: "Automatic Low Stock",
-                    })
-                  : _jsx("span", {
-                      className: "text-xs text-slate-500",
-                      children: "Manual",
-                    }),
+              render: (r) => r.source_label || "Manual Request",
             },
             {
               key: "approval_decision",
               label: "Approval",
               render: (r) =>
-                _jsx(StatusBadge, { status: r.approval_decision || "Pending" }),
+                _jsx(StatusBadge, { status: r.warehouse_draft ? "Warehouse Review" : r.approval_decision || "Pending" }),
             },
             { key: "pr_date", label: "Date" },
             {
               key: "status",
               label: "Status",
-              render: (r) => _jsx(StatusBadge, { status: r.status }),
+              render: (r) => _jsx(StatusBadge, { status: r.warehouse_draft ? "Warehouse Review" : r.status }),
             },
           ],
           rows: rows,
@@ -321,20 +327,16 @@ export default function PRPage() {
                   onClick: () => viewPr(r),
                   children: "Print / Download",
                 }),
+                r.status === "Draft" && r.can_manage_draft && _jsxs(_Fragment, { children: [_jsx("button", { className: "text-slate-600 text-xs font-medium", onClick: () => editPr(r), children: "Review / Edit" }), r.can_submit_draft && _jsx("button", { className: "text-emerald-600 text-xs font-medium", onClick: async () => { try { await client.post(`/procurement/prs/${r.id}/submit-to-procurement`); load(); } catch(e) { setError(e?.response?.data?.error || "Unable to submit PR"); } }, children: r.warehouse_owned ? "Submit to Procurement" : "Submit for Review" }), r.warehouse_draft && _jsx("button", { className: "text-rose-600 text-xs font-medium", onClick: () => setStatus(r.id,"Closed"), children: "No Purchase Required" })] }),
                 r.status === "Submitted" &&
                   r.approval_decision !== "Approved" &&
                   canApprove &&
                   _jsxs(_Fragment, {
                     children: [
                       _jsx("button", {
-                        className: "text-slate-600 text-xs font-medium",
-                        onClick: () => editPr(r),
-                        children: "Edit",
-                      }),
-                      _jsx("button", {
                         className: "text-emerald-600 text-xs font-medium",
-                        onClick: () => setStatus(r.id, "Approved"),
-                        children: "Approve",
+                        onClick: () => reviewPr(r),
+                        children: "Review / Approve",
                       }),
                       _jsx("button", {
                         className: "text-rose-600 text-xs font-medium",
@@ -347,6 +349,7 @@ export default function PRPage() {
             }),
         }),
       }),
+      reviewing && _jsx(ProcurementPRReview,{requisition:reviewing,onClose:()=>setReviewing(null),onSaved:load}),
       showForm &&
         _jsx(Modal, {
           title: editingId
@@ -368,10 +371,10 @@ export default function PRPage() {
                     children: "Request Details",
                   }),
                   _jsxs("div", {
-                    className: "grid md:grid-cols-2 gap-3",
+                    className: "grid grid-cols-1 md:grid-cols-3 gap-3",
                     children: [
                       _jsx(EmployeePicker, {
-                        label: "Employee requesting items",
+                        label: "Requested By",
                         employees: employees,
                         departments: depts,
                         value: requestorEmployeeId,
@@ -383,7 +386,7 @@ export default function PRPage() {
                         onCreated: (employee) =>
                           setEmployees((current) => [...current, employee]),
                       }),
-                      _jsx(SearchSelect, {
+                      _jsx(SearchSelect, {"data-field": "departmentId",
                         label: "Department",
                         options: depts.map((d) => ({
                           value: d.id,
@@ -393,6 +396,7 @@ export default function PRPage() {
                         onChange: (val) => setDepartmentId(Number(val)),
                         placeholder: "Search department",
                       }),
+                      _jsx(SearchSelect, {"data-field": "warehouseId", label:"Warehouse",options:warehouses.map(w=>({value:w.id,label:[w.warehouse_code,w.name].filter(Boolean).join(" ? ")})),value:warehouseId,onChange:value=>setWarehouseId(Number(value)),disabled:Boolean(editingId)}),
                     ],
                   }),
                 ],
@@ -415,8 +419,8 @@ export default function PRPage() {
                           children: [
                             _jsx("div", {
                               className: "col-span-12 lg:col-span-4",
-                              children: _jsx(SearchSelect, {
-                                label: "Requested Item",
+                              children: _jsx(SearchSelect, {"data-field": "item_id",
+                                label: "Item",
                                 options: items.map((it) => ({
                                   value: it.id,
                                   label: `${it.item_code} - ${it.description}`,
@@ -450,7 +454,7 @@ export default function PRPage() {
                                   className: "text-sm font-medium",
                                   children: "Quantity",
                                 }),
-                                _jsx("input", {
+                                _jsx("input", {"data-field": "quantity",
                                   className: "input mt-1",
                                   type: "number",
                                   min: "0.0001",
@@ -467,13 +471,13 @@ export default function PRPage() {
                               ],
                             }),
                             _jsxs("div", {
-                              className: "col-span-8 lg:col-span-3",
+                              className: "col-span-8 lg:col-span-2",
                               children: [
                                 _jsx("label", {
                                   className: "text-sm font-medium",
                                   children: "Required Date",
                                 }),
-                                _jsx("input", {
+                                _jsx("input", {"data-field": "required_date",
                                   className: "input mt-1",
                                   type: "date",
                                   value: line.required_date,
@@ -491,9 +495,9 @@ export default function PRPage() {
                               children: [
                                 _jsx("label", {
                                   className: "text-sm font-medium",
-                                  children: "Reason / Justification",
+                                  children: "Reason",
                                 }),
-                                _jsx("input", {
+                                _jsx("input", {"data-field": "reason",
                                   className: "input mt-1",
                                   placeholder: "Reason",
                                   value: line.reason,
@@ -503,7 +507,7 @@ export default function PRPage() {
                               ],
                             }),
                             _jsx("div", {
-                              className: "col-span-12 flex justify-end",
+                              className: "col-span-12 lg:col-span-1 flex justify-end lg:pt-8",
                               children:
                                 lines.length > 1 &&
                                 _jsx("button", {
@@ -511,8 +515,29 @@ export default function PRPage() {
                                   className:
                                     "text-xs font-medium text-rose-600 hover:text-rose-800",
                                   onClick: () => removeLine(i),
-                                  children: "Remove item line",
+                                  children: "Remove",
                                 }),
+                            }),
+                            line.recommended_base_quantity != null && _jsxs("div", {
+                              className: "col-span-12 border-t border-slate-200 pt-2 text-xs text-slate-600",
+                              children: [
+                                _jsxs("div", { className: "grid gap-1 sm:grid-cols-3", children: [
+                                  _jsxs("div", { children: ["Recommended Quantity: ", Number(line.recommended_base_quantity).toLocaleString(), " ", line.base_uom || ""] }),
+                                  _jsxs("div", { children: ["Entered Quantity: ", (Number(line.quantity || 0) * Number(line.conversion_factor_used || 1)).toLocaleString(), " ", line.base_uom || ""] }),
+                                  _jsxs("div", { children: ["Difference / Variance: ", (Number(line.quantity || 0) * Number(line.conversion_factor_used || 1) - Number(line.recommended_base_quantity)).toLocaleString(), " ", line.base_uom || ""] }),
+                                ] }),
+                                (Number(line.quantity || 0) * Number(line.conversion_factor_used || 1) !== Number(line.recommended_base_quantity) || Boolean(line.adjustment_reason) || Boolean(line.adjustment_note)) && _jsxs("details", {
+                                  className: "mt-2",
+                                  open: true,
+                                  children: [
+                                    _jsx("summary", { className: "cursor-pointer font-medium text-brand-600", children: "Explain Quantity Change" }),
+                                    _jsxs("div", { className: "mt-2 grid gap-3 sm:grid-cols-2", children: [
+                                      _jsxs("div", { className: "min-w-0", children: [_jsx("label", { className: "text-sm font-medium", children: "Reason for Quantity Change" }), _jsxs("select", {"data-field": "adjustment_reason",  className: "input mt-1", value: line.adjustment_reason || "", onChange: e => updateLine(i, "adjustment_reason", e.target.value), children: [_jsx("option", { value: "", children: "Select when quantity is changed..." }), ["Item no longer required","Stock found","Duplicate requirement","Upcoming transfer","Incorrect reorder level","Reduced demand","Other"].map(reason => _jsx("option", { value: reason, children: reason }, reason))] })] }),
+                                      line.adjustment_reason === "Other" && _jsxs("div", { className: "min-w-0", children: [_jsx("label", { className: "text-sm font-medium", children: "Adjustment Note" }), _jsx("input", {"data-field": "adjustment_note",  className: "input mt-1", value: line.adjustment_note || "", onChange: e => updateLine(i, "adjustment_note", e.target.value), placeholder: "Short explanation" })] }),
+                                    ] }),
+                                  ],
+                                }),
+                              ],
                             }),
                           ],
                         },
@@ -524,12 +549,12 @@ export default function PRPage() {
                     type: "button",
                     className: "text-brand-600 text-sm font-medium mt-2",
                     onClick: addLine,
-                    children: "+ Add line",
+                    children: "+ Add Another Item",
                   }),
                 ],
               }),
               error &&
-                _jsx("div", {
+                _jsx("div", {"data-error-message": true, role: "alert",
                   className:
                     "text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2",
                   children: error,
@@ -545,7 +570,7 @@ export default function PRPage() {
                   _jsx("button", {
                     className: "btn-primary",
                     onClick: submit,
-                    children: editingId ? "Save Changes" : "Submit PR",
+                    children: "Save Draft",
                   }),
                 ],
               }),
@@ -639,43 +664,10 @@ export default function PRPage() {
                     _jsx("button", {
                       className: "btn-primary",
                       onClick: async () => {
-                        await setStatus(viewing.id, "Approved");
+                        await reviewPr(viewing);
                         setViewing(null);
                       },
-                      children: "Approve",
-                    }),
-                  ],
-                }),
-              viewing.status === "Submitted" &&
-                viewing.approvals?.some(
-                  (approval) => approval.decision === "Approved",
-                ) &&
-                canCloseBalance &&
-                _jsxs("div", {
-                  className:
-                    "print:hidden rounded-lg border border-amber-200 bg-amber-50 p-3",
-                  children: [
-                    _jsx("div", {
-                      className: "mb-2 text-sm text-amber-900",
-                      children:
-                        "The PR has an approved open balance. Close it only when no further PO will be created for the remaining quantity.",
-                    }),
-                    _jsx("div", {
-                      className: "flex justify-end",
-                      children: _jsx("button", {
-                        className: "btn-secondary text-amber-800",
-                        onClick: async () => {
-                          if (
-                            window.confirm(
-                              "Close the remaining PR balance? No additional PO can be created from this PR.",
-                            )
-                          ) {
-                            await setStatus(viewing.id, "Closed");
-                            setViewing(null);
-                          }
-                        },
-                        children: "Close Remaining PR Balance",
-                      }),
+                      children: "Review / Approve",
                     }),
                   ],
                 }),

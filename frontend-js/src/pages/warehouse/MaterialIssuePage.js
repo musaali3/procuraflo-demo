@@ -1,3 +1,6 @@
+import ProfessionalMaterialIssue from '../../components/ProfessionalMaterialIssue';
+import MaterialIssueForm from '../../components/MaterialIssueForm';
+import { showErrorGuidance } from '../../utils/errorGuidance';
 import {
   jsx as _jsx,
   Fragment as _Fragment,
@@ -11,10 +14,9 @@ import StatusBadge from "../../components/StatusBadge";
 import { useAuth } from "../../contexts/AuthContext";
 import { formatCurrency } from "../../utils/currency";
 import { useSearchParams } from "react-router-dom";
-import SearchSelect from "../../components/SearchSelect";
-import EmployeePicker from "../../components/EmployeePicker";
 import { downloadElementPdf } from "../../utils/downloadPdf";
 import { printElement } from "../../utils/printCopies";
+import useAutoRefresh from "../../hooks/useAutoRefresh";
 export default function MaterialIssuePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
@@ -34,6 +36,7 @@ export default function MaterialIssuePage() {
   const [items, setItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [threshold, setThreshold] = useState(500);
+  const [editingId,setEditingId]=useState(null);
   const [showForm, setShowForm] = useState(false);
   const [employeeId, setEmployeeId] = useState("");
   const [purpose, setPurpose] = useState("");
@@ -52,6 +55,7 @@ export default function MaterialIssuePage() {
   function load() {
     client.get("/warehouse/material-issues").then((res) => setIssues(res.data));
   }
+  useAutoRefresh(load);
   useEffect(() => {
     load();
     client
@@ -106,10 +110,20 @@ export default function MaterialIssuePage() {
       ),
     );
   }
-  const estimatedValue = lines.reduce((sum, l) => {
-    const item = items.find((it) => it.id === l.item_id);
-    return sum + (l.quantity || 0) * (item?.standard_cost || 0);
-  }, 0);
+  const [valuation,setValuation] = useState(null);
+  const [valuationMessage,setValuationMessage] = useState("");
+  useEffect(() => {
+    let active=true;setValuation(null);
+    if(!showForm)return;
+    if(lines.some(line=>!line.item_id||!line.warehouse_id||!line.location_id||Number(line.quantity)<=0)){
+      setValuationMessage("Select an item, warehouse, storage location and positive quantity to check value and approval.");return;
+    }
+    setValuationMessage("Checking FIFO value and approval limit...");
+    const timer=setTimeout(()=>client.post("/warehouse/material-issue-preview",{items:lines}).then(({data})=>{
+      if(active){setValuation(data);setValuationMessage("");}
+    }).catch(error=>{if(active)setValuationMessage(error.response?.data?.error||"Unable to check issue value. Please retry.");}),250);
+    return ()=>{active=false;clearTimeout(timer);};
+  },[lines,showForm]);
   const hasHighValueItem = lines.some(
     (l) =>
       items.find((it) => it.id === l.item_id)?.high_value_flag ||
@@ -118,13 +132,6 @@ export default function MaterialIssuePage() {
   const hasReturnableItem = lines.some(
     (line) => items.find((item) => item.id === line.item_id)?.consumable_returnable === "Returnable",
   );
-  const willNeedApproval =
-    user?.role !== "SupplyChainManager" &&
-    (estimatedValue > threshold || hasHighValueItem || hasReturnableItem);
-  const issueApproverRole =
-    user?.role === "WarehouseManager"
-      ? "Supply Chain Manager"
-      : "Warehouse Manager";
   async function submit() {
     setError("");
     if (
@@ -157,12 +164,12 @@ export default function MaterialIssuePage() {
         "Requested quantity exceeds available stock. Review the available quantity shown beside each line.",
       );
     try {
-      await client.post("/warehouse/material-issues", {
+      await client.request({method:editingId?"put":"post",url:editingId?`/warehouse/material-issues/${editingId}`:"/warehouse/material-issues",data: {
         employee_id: employeeId,
         purpose,
         items: lines,
-      });
-      setShowForm(false);
+      }});
+      setShowForm(false);setEditingId(null);
       setEmployeeId("");
       setPurpose("");
       setLines([
@@ -183,7 +190,7 @@ export default function MaterialIssuePage() {
       await client.put(`/warehouse/material-issues/${id}/approve`);
       load();
     } catch (e) {
-      alert(e?.response?.data?.error || "Approval failed");
+      showErrorGuidance({message: e?.response?.data?.error || "Approval failed"});
     }
   }
   async function reject(id) {
@@ -191,7 +198,7 @@ export default function MaterialIssuePage() {
       await client.put(`/warehouse/material-issues/${id}/reject`);
       load();
     } catch (e) {
-      alert(e?.response?.data?.error || "Rejection failed");
+      showErrorGuidance({message: e?.response?.data?.error || "Rejection failed"});
     }
   }
   const canApprove =
@@ -205,6 +212,13 @@ export default function MaterialIssuePage() {
     });
     setThresholdSaved(true);
     setTimeout(() => setThresholdSaved(false), 2000);
+  }
+  async function editIssue(row){
+    try{const {data}=await client.get(`/warehouse/material-issues/${row.id}`);
+      setEditingId(data.id);setEmployeeId(data.employee_id);setPurpose(data.purpose||"");
+      setLines(data.items.map(line=>({...line,item_search:`${line.item_code} - ${line.description}`})));
+      setViewing(null);setError("");setShowForm(true);
+    }catch(e){setError(e.response?.data?.error||"Unable to open Material Issue for editing");}
   }
   async function viewIssue(row) {
     try {
@@ -255,7 +269,7 @@ export default function MaterialIssuePage() {
           className: "card p-4 mb-4",
           children: [
             _jsx("h2", {
-              className: "font-semibold text-indigo-900",
+              className: "font-semibold text-blue-900",
               children: "Material Issue Approval Control",
             }),
             _jsx("p", {
@@ -274,7 +288,7 @@ export default function MaterialIssuePage() {
                           className: "text-sm font-medium",
                           children: "Approval Threshold",
                         }),
-                        _jsx("input", {
+                        _jsx("input", {"data-field": "threshold",
                           className: "input mt-1",
                           type: "number",
                           min: "0",
@@ -345,10 +359,11 @@ export default function MaterialIssuePage() {
                 _jsx("button", {
                   className: "text-brand-600 text-xs font-medium",
                   onClick: () => viewIssue(r),
-                  children: "Print / Download",
+                  children: r.status==="PendingApproval"?"Review":"Print / Download",
                 }),
+                r.can_edit && _jsx("button", {className:"text-brand-600 text-xs font-medium",onClick:()=>editIssue(r),children:"Edit"}),
                 r.status === "PendingApproval" &&
-                  canApprove &&
+                  canApprove && r.can_approve &&
                   _jsxs(_Fragment, {
                     children: [
                       _jsx("button", {
@@ -369,392 +384,17 @@ export default function MaterialIssuePage() {
       }),
       showForm &&
         _jsx(Modal, {
-          title: "New Material Issue",
+          title: editingId ? "Review & Edit Material Issue" : "New Material Issue",
           onClose: () => setShowForm(false),
           wide: true,
-          children: _jsxs("div", {
-            className: "compact-form",
-            children: [
-              _jsxs("div", {
-                className: "rounded-lg border border-slate-200 p-4 bg-slate-50",
-                children: [
-                  _jsx("h3", {
-                    className: "font-medium text-slate-800 mb-3",
-                    children: "Issue Details",
-                  }),
-                  _jsx(EmployeePicker, {
-                    label: "Employee receiving material",
-                    employees: employees,
-                    departments: departments,
-                    value: employeeId,
-                    onChange: (val) => setEmployeeId(val ? Number(val) : ""),
-                    onCreated: (employee) =>
-                      setEmployees((current) => [...current, employee]),
-                  }),
-                  _jsxs("div", {
-                    className: "mt-3",
-                    children: [
-                      _jsx("label", {
-                        className: "text-sm font-medium text-slate-700",
-                        children: "Purpose",
-                      }),
-                      _jsx("input", {
-                        className: "input mt-1",
-                        value: purpose,
-                        onChange: (e) => setPurpose(e.target.value),
-                        placeholder: "e.g. Line 3 maintenance",
-                      }),
-                    ],
-                  }),
-                ],
-              }),
-              _jsxs("div", {
-                className: "rounded-lg border border-slate-200 p-4 bg-white",
-                children: [
-                  _jsx("h3", {
-                    className: "font-medium text-slate-800 mb-3",
-                    children: "Issued Items",
-                  }),
-                  _jsx("div", {
-                    className: "space-y-2 mt-1",
-                    children: lines.map((line, i) =>
-                      _jsxs(
-                        "div",
-                        {
-                          className: "grid grid-cols-12 gap-2 items-center",
-                          children: [
-                            _jsx("div", {
-                              className: "col-span-5",
-                              children: _jsx(SearchSelect, {
-                                label: "Item to Issue",
-                                options: items.map((it) => ({
-                                  value: it.id,
-                                  label: `${it.item_code} - ${it.description}`,
-                                })),
-                                value: line.item_id || line.item_search || "",
-                                onChange: (val) => {
-                                  const selected = items.find(
-                                    (it) => it.id === Number(val),
-                                  );
-                                  setLines((current) =>
-                                    current.map((currentLine, index) =>
-                                      index === i
-                                        ? {
-                                            ...currentLine,
-                                            item_id: selected
-                                              ? selected.id
-                                              : "",
-                                            item_search: selected
-                                              ? `${selected.item_code} - ${selected.description}`
-                                              : "",
-                                            location_id: "",
-                                          }
-                                        : currentLine,
-                                    ),
-                                  );
-                                },
-                                placeholder: "Search item",
-                              }),
-                            }),
-                            warehouseBound
-                              ? _jsxs("div", {
-                                  className:
-                                    "input col-span-4 bg-slate-100 text-slate-700",
-                                  children: [
-                                    _jsx("span", {
-                                      className:
-                                        "block text-[10px] uppercase text-slate-500",
-                                      children: "Issuing warehouse",
-                                    }),
-                                    warehouses.find(
-                                      (w) =>
-                                        Number(w.id) ===
-                                        Number(assignedWarehouseId),
-                                    )?.name ||
-                                      user?.warehouse_name ||
-                                      "Assigned warehouse",
-                                  ],
-                                })
-                              : _jsxs("div", {
-                                  className: "col-span-4",
-                                  children: [
-                                    _jsx("label", {
-                                      className: "text-sm font-medium",
-                                      children: "Issuing Warehouse",
-                                    }),
-                                    _jsxs("select", {
-                                      className: "input mt-1",
-                                      value: line.warehouse_id,
-                                      onChange: (e) =>
-                                        updateLine(
-                                          i,
-                                          "warehouse_id",
-                                          Number(e.target.value),
-                                        ),
-                                      children: [
-                                        _jsx("option", {
-                                          value: "",
-                                          children: "Warehouse...",
-                                        }),
-                                        warehouses.map((w) =>
-                                          _jsx(
-                                            "option",
-                                            { value: w.id, children: w.name },
-                                            w.id,
-                                          ),
-                                        ),
-                                      ],
-                                    }),
-                                  ],
-                                }),
-                            _jsxs("div", {
-                              className: "col-span-3",
-                              children: [
-                                _jsx("label", {
-                                  className: "text-sm font-medium",
-                                  children: "Issue Quantity",
-                                }),
-                                _jsx("input", {
-                                  className: "input mt-1",
-                                  type: "number",
-                                  placeholder: "Quantity",
-                                  value: line.quantity,
-                                  onChange: (e) =>
-                                    updateLine(
-                                      i,
-                                      "quantity",
-                                      Number(e.target.value),
-                                    ),
-                                }),
-                              ],
-                            }),
-                            _jsxs("div", {
-                              className: "col-span-12",
-                              children: [
-                                _jsx("label", {
-                                  className: "text-sm font-medium",
-                                  children: "Issue From Physical Bin",
-                                }),
-                                _jsxs("select", {
-                                  className: "input mt-1",
-                                  value: line.location_id || "",
-                                  onChange: (e) =>
-                                    updateLine(
-                                      i,
-                                      "location_id",
-                                      Number(e.target.value),
-                                    ),
-                                  children: [
-                                    _jsx("option", {
-                                      value: "",
-                                      children: "Select stocked Bin...",
-                                    }),
-                                    stock
-                                      .filter(
-                                        (s) =>
-                                          s.item_id === line.item_id &&
-                                          s.warehouse_id ===
-                                            line.warehouse_id &&
-                                          Number(s.quantity) > 0 &&
-                                          s.location_id,
-                                      )
-                                      .map((s) =>
-                                        _jsxs(
-                                          "option",
-                                          {
-                                            value: s.location_id,
-                                            children: [
-                                              s.location_code,
-                                              " \u2014 Available ",
-                                              Number(
-                                                s.quantity,
-                                              ).toLocaleString(),
-                                            ],
-                                          },
-                                          s.id,
-                                        ),
-                                      ),
-                                  ],
-                                }),
-                              ],
-                            }),
-                            _jsx("div", {
-                              className: "col-span-12 flex justify-end",
-                              children:
-                                lines.length > 1 &&
-                                _jsx("button", {
-                                  type: "button",
-                                  className:
-                                    "text-xs font-medium text-rose-600 hover:text-rose-800",
-                                  onClick: () => removeLine(i),
-                                  children: "Remove item line",
-                                }),
-                            }),
-                            _jsxs("div", {
-                              className:
-                                "col-span-12 rounded-lg border border-sky-100 bg-sky-50/70 px-3 py-2 text-xs",
-                              children: [
-                                _jsxs("div", {
-                                  className: "font-medium text-sky-900",
-                                  children: [
-                                    "Unit: ",
-                                    items.find((it) => it.id === line.item_id)
-                                      ?.issue_uom ||
-                                      items.find((it) => it.id === line.item_id)
-                                        ?.uom ||
-                                      "—",
-                                  ],
-                                }),
-                                line.item_id
-                                  ? (() => {
-                                      const balances = stock.filter(
-                                        (balance) =>
-                                          balance.item_id === line.item_id &&
-                                          (!line.warehouse_id ||
-                                            balance.warehouse_id ===
-                                              line.warehouse_id),
-                                      );
-                                      return balances.length
-                                        ? _jsxs("div", {
-                                            className: "mt-1 space-y-1",
-                                            children: [
-                                              balances.map((balance) =>
-                                                _jsxs(
-                                                  "div",
-                                                  {
-                                                    className:
-                                                      "flex flex-wrap justify-between gap-2 text-slate-700",
-                                                    children: [
-                                                      _jsxs("span", {
-                                                        children: [
-                                                          _jsx("strong", {
-                                                            children:
-                                                              balance.warehouse_name,
-                                                          }),
-                                                          " \u00B7 Location: ",
-                                                          _jsx("strong", {
-                                                            children:
-                                                              balance.location_code
-                                                                ? `${balance.location_type || "Location"} ${balance.location_code}`
-                                                                : "Unassigned",
-                                                          }),
-                                                        ],
-                                                      }),
-                                                      _jsxs("span", {
-                                                        children: [
-                                                          "Available: ",
-                                                          _jsx("strong", {
-                                                            className:
-                                                              "text-emerald-700",
-                                                            children: Number(
-                                                              balance.quantity,
-                                                            ).toLocaleString(),
-                                                          }),
-                                                        ],
-                                                      }),
-                                                    ],
-                                                  },
-                                                  balance.id,
-                                                ),
-                                              ),
-                                              _jsxs("div", {
-                                                className:
-                                                  "border-t border-sky-200 pt-1 flex justify-between font-semibold text-sky-900",
-                                                children: [
-                                                  _jsxs("span", {
-                                                    children: [
-                                                      "Total available",
-                                                      line.warehouse_id
-                                                        ? " in selected warehouse"
-                                                        : "",
-                                                    ],
-                                                  }),
-                                                  _jsx("span", {
-                                                    children: balances
-                                                      .reduce(
-                                                        (sum, balance) =>
-                                                          sum +
-                                                          Number(
-                                                            balance.quantity,
-                                                          ),
-                                                        0,
-                                                      )
-                                                      .toLocaleString(),
-                                                  }),
-                                                ],
-                                              }),
-                                            ],
-                                          })
-                                        : _jsxs("div", {
-                                            className: "mt-1 text-rose-600",
-                                            children: [
-                                              "No available stock or assigned location found for this item",
-                                              line.warehouse_id
-                                                ? " in the selected warehouse"
-                                                : "",
-                                              ".",
-                                            ],
-                                          });
-                                    })()
-                                  : _jsx("div", {
-                                      className: "mt-1 text-slate-500",
-                                      children:
-                                        "Select an item to view its warehouse location and available stock.",
-                                    }),
-                              ],
-                            }),
-                          ],
-                        },
-                        i,
-                      ),
-                    ),
-                  }),
-                  _jsx("button", {
-                    type: "button",
-                    className: "text-brand-600 text-sm font-medium mt-2",
-                    onClick: addLine,
-                    children: "+ Add line",
-                  }),
-                ],
-              }),
-              _jsxs("div", {
-                className: `rounded-lg px-3 py-2 text-sm ${willNeedApproval ? "bg-amber-50 text-amber-700" : "bg-slate-50 text-slate-600"}`,
-                children: [
-                  "Estimated value: ",
-                  formatCurrency(estimatedValue),
-                  ".",
-                  " ",
-                  willNeedApproval
-                    ? hasReturnableItem
-                      ? `Returnable items require ${issueApproverRole} approval and controlled employee custody before stock is deducted.`
-                      : hasHighValueItem
-                        ? `High-value items require ${issueApproverRole} approval before stock is deducted.`
-                        : `This issue exceeds the assigned authority limit and requires ${issueApproverRole} approval before stock is deducted.`
-                    : "Below threshold — this issue will post immediately.",
-                ],
-              }),
-              error &&
-                _jsx("div", {
-                  className:
-                    "text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2",
-                  children: error,
-                }),
-              _jsxs("div", {
-                className: "flex justify-end gap-2 pt-2",
-                children: [
-                  _jsx("button", {
-                    className: "btn-secondary",
-                    onClick: () => setShowForm(false),
-                    children: "Cancel",
-                  }),
-                  _jsx("button", {
-                    className: "btn-primary",
-                    onClick: submit,
-                    children: "Submit",
-                  }),
-                ],
-              }),
-            ],
+          children: _jsx(MaterialIssueForm, {
+            employees, departments, employeeId, setEmployeeId, setEmployees,
+            purpose, setPurpose, lines, items, warehouses, warehouseBound,
+            assignedWarehouseId, user, stock, setLines, updateLine, removeLine,
+            addLine, valuation, valuationMessage, hasHighValueItem,
+            hasReturnableItem, error,
+            onCancel: () => { setShowForm(false); setEditingId(null); },
+            submit, editingId,
           }),
         }),
       viewing &&
@@ -766,7 +406,7 @@ export default function MaterialIssuePage() {
             className: "space-y-3 text-sm",
             children: [
               _jsxs("div", {
-                className: "sticky top-0 z-10 flex justify-end gap-2 rounded-lg border border-indigo-100 bg-white/95 p-3 shadow-sm print:hidden",
+                className: "sticky top-0 z-10 flex justify-end gap-2 rounded-lg border border-blue-100 bg-white/95 p-3 shadow-sm print:hidden",
                 children: [
                   _jsx("button", {
                     className: "btn-secondary",
@@ -780,88 +420,8 @@ export default function MaterialIssuePage() {
                   }),
                 ],
               }),
-              _jsx("div", {
-                id: "material-issue-print-document",
-                className: "space-y-3 rounded-lg bg-white p-4",
-                children: _jsxs("div", {
-                  className: "space-y-3",
-                  children: [
-              _jsxs("div", {
-                children: [
-                  _jsx("span", {
-                    className: "text-slate-500",
-                    children: "Employee:",
-                  }),
-                  " ",
-                  viewing.employee_code,
-                  " - ",
-                  viewing.employee_name,
-                  " — ",
-                  viewing.employee_department_name || "No department",
-                ],
-              }),
-              _jsxs("div", {
-                children: [
-                  _jsx("span", {
-                    className: "text-slate-500",
-                    children: "Purpose:",
-                  }),
-                  " ",
-                  viewing.purpose || "-",
-                ],
-              }),
-              _jsxs("table", {
-                className: "table-base",
-                children: [
-                  _jsx("thead", {
-                    children: _jsxs("tr", {
-                      children: [
-                        _jsx("th", { children: "Item" }),
-                        _jsx("th", { children: "Warehouse / Site" }),
-                        _jsx("th", { children: "Physical Bin" }),
-                        _jsx("th", { children: "Quantity" }),
-                        _jsx("th", { children: "Value" }),
-                      ],
-                    }),
-                  }),
-                  _jsx("tbody", {
-                    children: viewing.items.map((line) =>
-                      _jsxs(
-                        "tr",
-                        {
-                          children: [
-                            _jsxs("td", {
-                              children: [
-                                line.item_code,
-                                " - ",
-                                line.description,
-                              ],
-                            }),
-                            _jsxs("td", {
-                              children: [
-                                line.warehouse_name,
-                                line.site_name ? ` — ${line.site_name}` : "",
-                              ],
-                            }),
-                            _jsx("td", {
-                              children:
-                                line.location_code || "Legacy / unassigned",
-                            }),
-                            _jsx("td", { children: line.quantity }),
-                            _jsx("td", {
-                              children: formatCurrency(line.value),
-                            }),
-                          ],
-                        },
-                        line.id,
-                      ),
-                    ),
-                  }),
-                ],
-              }),
-                  ],
-                }),
-              }),
+              _jsx(ProfessionalMaterialIssue, {issue:viewing}),
+              viewing.can_edit && _jsx("button",{className:"btn-secondary",onClick:()=>editIssue(viewing),children:"Edit Material Issue"}),
               viewing.status === "PendingApproval" &&
                 canApprove &&
                 _jsxs("div", {

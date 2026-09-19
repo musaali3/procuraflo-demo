@@ -1,3 +1,5 @@
+import HorizontalScroll from './HorizontalScroll';
+import { PRODUCT_BRAND } from '../config/brand';
 import { useMemo, useState } from "react";
 import { formatCurrency, isCurrencyField } from "../utils/currency";
 import Modal from "./Modal";
@@ -22,10 +24,10 @@ export function RecordDetailModal({ row, onClose, actions }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
         <span>Record details and authorized workflow actions</span>
         {status != null && status !== "" && (
-          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-indigo-700 shadow-sm">{String(status)}</span>
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 shadow-sm">{String(status)}</span>
         )}
       </div>
-      {actions && <section className="record-detail-actions sticky top-0 z-20 mb-4 rounded-xl border-2 border-indigo-300 bg-indigo-50 p-4 shadow-lg">
+      {actions && <section className="record-detail-actions sticky top-0 z-20 mb-4 rounded-xl border-2 border-blue-300 bg-blue-50 p-4 shadow-lg">
         <div className="record-detail-actions-title">Available document actions</div>
         <div className="flex flex-wrap gap-3" onClick={(event) => { if (event.target.closest("button")) onClose(); }}>{actions}</div>
       </section>}
@@ -54,7 +56,11 @@ function openRowDetails(row) {
   close.className = "btn-secondary";
   close.textContent = "× Close";
   close.onclick = () => dialog.close();
-  header.append(title, close);
+  const logo = document.createElement("img");
+  logo.src = PRODUCT_BRAND.logo;
+  logo.alt = PRODUCT_BRAND.name;
+  logo.className = "product-brand h-8 w-32 rounded object-contain";
+  header.append(logo, title, close);
   const hint = document.createElement("p");
   hint.className = "record-detail-hint";
   hint.textContent = "Read-only master-data record";
@@ -106,13 +112,14 @@ function compareValues(left, right, direction) {
 }
 
 export default function DataTable({
-  columns,
-  rows,
+  columns = [],
+  rows = [],
   loading,
   emptyLabel = "No records found",
   onRowClick,
   onRowDoubleClick,
   actions,
+  actionLabel = "View Document",
   inlineActions = false,
   detailActions = true,
   footer,
@@ -166,7 +173,7 @@ export default function DataTable({
     <div>
       {searchable && (
         <div className="border-b border-slate-100 p-3">
-          <input
+          <input data-field={"query"}
             type="search"
             autoComplete="off"
             className="input w-full max-w-sm"
@@ -181,19 +188,14 @@ export default function DataTable({
           </div>
         </div>
       )}
-      {tableClassName && (
-        <div className="table-scroll-hint" aria-hidden="true">
-          <span>Scroll left or right to view all columns</span>
-          <span className="table-scroll-hint-arrows">&#8592;&nbsp;&nbsp;&#8594;</span>
-        </div>
-      )}
-      <div
+      <HorizontalScroll
         className={`data-table-scroll overflow-x-auto ${tableClassName ? "data-table-scroll-wide" : ""}`.trim()}
         tabIndex={0}
         role="region"
         aria-label="Scrollable data table. Use Shift and mouse wheel, the horizontal scrollbar, or keyboard arrow keys to view all columns."
       >
         <table className={`table-base ${tableClassName}`.trim()} data-managed-sort="true">
+          {columns.some(column=>column.width)&&<colgroup>{columns.map(column=><col key={String(column.key)} style={{width:column.width}}/>)}<col style={{width:"8.25rem"}}/></colgroup>}
           <thead>
             <tr>
               {columns.map((column) => (
@@ -286,9 +288,9 @@ export default function DataTable({
                   >
                     <div className="flex flex-wrap justify-end gap-2">
                       <button type="button" className="record-view-button" onClick={() => viewDetails(row)}>
-                        View Document
+                        {actionLabel}
                       </button>
-                      {/* Workflow actions are intentionally shown only inside the View section. */}
+                      {inlineActions && actions?.(row)}
                     </div>
                   </td>
                 </tr>
@@ -310,7 +312,7 @@ export default function DataTable({
             </tfoot>
           )}
         </table>
-      </div>
+      </HorizontalScroll>
       <RecordDetailModal row={detailRow} onClose={() => setDetailRow(null)} actions={detailActions && detailRow ? actions?.(detailRow) : null} />
     </div>
   );

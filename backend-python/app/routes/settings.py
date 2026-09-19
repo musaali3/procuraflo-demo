@@ -20,13 +20,13 @@ def company(_u:User):return fetch_one('SELECT * FROM company WHERE deleted_at IS
 @router.get('/branding')
 def branding():
     row=fetch_one('SELECT name,logo_url,address,phone,email,website,tax_info,registration_number,branch_info,currency,base_currency,country_code,time_zone,financial_year FROM company WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 1')or{}
-    return {'company_name':row.get('name')or'Company Name','logo_url':row.get('logo_url'),'address':row.get('address')or'','phone':row.get('phone')or'','email':row.get('email')or'','website':row.get('website')or'','tax_info':row.get('tax_info')or'','registration_number':row.get('registration_number')or'','branch_info':row.get('branch_info')or'','currency':row.get('base_currency')or row.get('currency')or'SAR','base_currency':row.get('base_currency')or row.get('currency')or'SAR','country_code':row.get('country_code')or'SA','time_zone':row.get('time_zone')or'Asia/Riyadh','financial_year':row.get('financial_year')or'','application_name':'ProcuraFlow'}
+    return {'company_name':row.get('name')or'Company Name','logo_url':row.get('logo_url'),'address':row.get('address')or'','phone':row.get('phone')or'','email':row.get('email')or'','website':row.get('website')or'','tax_info':row.get('tax_info')or'','registration_number':row.get('registration_number')or'','branch_info':row.get('branch_info')or'','currency':row.get('base_currency')or row.get('currency')or'SAR','base_currency':row.get('base_currency')or row.get('currency')or'SAR','country_code':row.get('country_code')or'SA','time_zone':row.get('time_zone')or'Asia/Riyadh','financial_year':row.get('financial_year')or'','application_name':'Procuraflo','product_brand':{'name':'Procuraflo','logo_url':'/branding/procuraflo-logo.png?v=20260906','icon_url':'/branding/procuraflo-icon.svg?v=20260906','background':'#202543'}}
 @router.put('/company')
 def update_company(body:dict,user:dict=Depends(admin)):
     body=dict(body)
     selected_currency=str(body.get('base_currency')or body.get('currency')or'').strip().upper()
     if selected_currency:body.update(currency=selected_currency,base_currency=selected_currency)
-    allowed=['name','address','phone','email','website','registration_number','branch_info','tax_info','currency','base_currency','country_code','city_id','postal_code','region_province','financial_year','time_zone'];keys=[k for k in body if k in allowed]
+    allowed=['name','address','phone','email','website','registration_number','branch_info','tax_info','currency','base_currency','country_code','city_id','postal_code','region_province','financial_year','time_zone','default_payment_terms'];keys=[k for k in body if k in allowed]
     if not keys:raise HTTPException(400,'No company fields provided')
     row=fetch_one('SELECT * FROM company WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 1')
     with transaction(immediate=True)as c:c.execute(f"UPDATE company SET {','.join(k+'=?'for k in keys)} WHERE id=?",tuple(body[k]for k in keys)+(row['id'],));log_audit(c,'company',row['id'],'UPDATE',user['id'],row,body)
@@ -41,7 +41,7 @@ def set_value(key:str,body:dict,user:User):
     return {'key':key,'value':value}
 @router.post('/backup')
 def backup(user:dict=Depends(admin)):
-    name=f"procuraflow-{secrets.token_hex(6)}.db";target=BACKUPS/name
+    name=f"procuraflo-{secrets.token_hex(6)}.db";target=BACKUPS/name
     source=sqlite3.connect(active_db_path());counts={table:source.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]for table in('users','employees','items','warehouses','inventory_stock','inventory_layers','stock_ledger','audit_log')};destination=sqlite3.connect(target);source.backup(destination);destination.close();source.close();verification=verify_backup(target,counts)
     with transaction(immediate=True)as c:c.execute("INSERT INTO backup_restore_history(backup_reference,backup_type,database_included,attachments_included,configuration_included,backup_status,restore_tested,restore_test_date,restore_result,notes)VALUES(?,'MANUAL',1,0,1,'SUCCESS',1,datetime('now'),?,'Verified FastAPI SQLite backup')",(name,verification));log_audit(c,'backup_restore_history',None,'CREATE',user['id'],after={'backup_reference':name,'verification':verification})
     return FileResponse(target,media_type='application/octet-stream',filename=name)
@@ -127,14 +127,38 @@ def download_import_template(template_type:str,user:dict=Depends(admin)):
     if not template:raise HTTPException(404,'Unknown import template')
     from openpyxl import Workbook
     from openpyxl.styles import Alignment,Font,PatternFill,Border,Side
-    book=Workbook();sheet=book.active;sheet.title='Import Template';sheet.append(['ProcuraFlow - Precast Supply Chain Control System']);sheet.append([f'{template_type.replace("-"," ").title()} Import Template']);sheet.append(template[0]);sheet.append(template[1]);sheet.freeze_panes='A4';sheet.auto_filter.ref=f'A3:{sheet.cell(3,len(template[0])).column_letter}4'
+    book=Workbook();sheet=book.active;sheet.title='Import Template';sheet.append(['Procuraflo - Supply Chain Control System']);sheet.append([f'{template_type.replace("-"," ").title()} Import Template']);sheet.append(template[0]);sheet.append(template[1]);sheet.freeze_panes='A4';sheet.auto_filter.ref=f'A3:{sheet.cell(3,len(template[0])).column_letter}4'
     sheet.merge_cells(start_row=1,start_column=1,end_row=1,end_column=len(template[0]));sheet.merge_cells(start_row=2,start_column=1,end_row=2,end_column=len(template[0]))
     sheet['A1'].font=Font(bold=True,color='FFFFFF',size=16);sheet['A1'].fill=PatternFill('solid',fgColor='052F5F');sheet['A1'].alignment=Alignment(vertical='center')
     sheet['A2'].font=Font(bold=True,color='075FA8',size=12);sheet['A2'].fill=PatternFill('solid',fgColor='F2F7FA')
     for cell in sheet[3]:cell.font=Font(bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='075FA8');cell.alignment=Alignment(wrap_text=True,vertical='center');cell.border=Border(bottom=Side(style='thin',color='0796A5'))
     sheet.row_dimensions[1].height=28;sheet.row_dimensions[2].height=22;sheet.row_dimensions[3].height=30
     for index,header in enumerate(template[0],1):sheet.column_dimensions[sheet.cell(3,index).column_letter].width=min(34,max(12,len(header)+3))
-    output=io.BytesIO();book.save(output);output.seek(0);filename=f'{template_type}-template.xlsx'
+    from openpyxl.drawing.image import Image as SpreadsheetImage
+    brand_image=SpreadsheetImage(str(Path(__file__).resolve().parents[1]/'assets'/'procuraflo-logo.png'))
+    brand_image.width=144;brand_image.height=48
+    sheet.add_image(brand_image,'A1');sheet.row_dimensions[1].height=58
+    sheet['A1'].alignment=Alignment(vertical='bottom',horizontal='left')
+    sheet.print_title_rows='1:3';sheet.print_options.horizontalCentered=True
+    sheet.sheet_properties.pageSetUpPr.fitToPage=True;sheet.page_setup.fitToWidth=1;sheet.page_setup.fitToHeight=0
+    sheet.page_setup.paperSize=sheet.PAPERSIZE_A4;sheet.page_setup.orientation=sheet.ORIENTATION_LANDSCAPE
+    sheet.oddFooter.right.text='Page &P of &N'
+    book.properties.creator='Procuraflo';book.properties.title=f'Procuraflo {template_type} import template'
+    output=io.BytesIO();book.save(output)
+    # Clip the workbook picture to a rounded box without changing its pixels.
+    import zipfile
+    from xml.etree import ElementTree as ET
+    rounded_output=io.BytesIO()
+    with zipfile.ZipFile(output) as original, zipfile.ZipFile(rounded_output,'w',zipfile.ZIP_DEFLATED) as rounded:
+        for entry in original.infolist():
+            content=original.read(entry.filename)
+            if entry.filename.startswith('xl/drawings/drawing') and entry.filename.endswith('.xml'):
+                drawing=ET.fromstring(content)
+                for geometry in drawing.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}prstGeom'):
+                    geometry.set('prst','roundRect')
+                content=ET.tostring(drawing,encoding='utf-8',xml_declaration=True)
+            rounded.writestr(entry,content)
+    output=rounded_output;output.seek(0);filename=f'{template_type}-template.xlsx'
     return StreamingResponse(output,media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="{filename}"'})
 def normalized_row(row):return {str(key or'').strip().lower():value for key,value in row.items()}
 def item_import_values(row,row_number):

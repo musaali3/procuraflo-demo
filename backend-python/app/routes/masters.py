@@ -13,6 +13,7 @@ from ..database import transaction
 from ..permissions import defaults_for_role
 from ..security import User, roles
 from ..storage import upload_path
+from ..stock import consume,receive,is_terminal_storage_location
 
 router = APIRouter(prefix='/api/masters', tags=['masters'])
 SIGNATURES=upload_path('signatures')
@@ -51,7 +52,6 @@ def create_general_employee(body:dict,user:User):
 
 @router.post('/general-employees/quick',status_code=201)
 def quick_general_employee(body:dict,user:User):
-    if not str(body.get('employee_code')or'').strip():raise HTTPException(400,'Employee ID is required')
     return create_company_employee(body,user)
 
 @router.put('/general-employees/{employee_id}')
@@ -60,12 +60,11 @@ def update_general_employee(employee_id:int,body:dict,user:dict=Depends(roles(*M
     if not existing:raise HTTPException(404,'Employee not found')
     department=fetch_one('SELECT name FROM departments WHERE id=? AND deleted_at IS NULL',(body.get('department_id'),))
     if not department or department['name'].strip().lower() in ('warehouse','procurement'):raise HTTPException(400,'Select a general company department')
-    code=str(body.get('employee_code')or'').strip().upper();name=str(body.get('name')or'').strip()
-    if not code or not name:raise HTTPException(400,'Employee ID and name are required')
-    if fetch_one('SELECT id FROM employees WHERE upper(employee_code)=upper(?) AND id<>?',(code,employee_id)):raise HTTPException(409,f'Employee ID {code} already exists')
+    name=str(body.get('name')or'').strip()
+    if not name:raise HTTPException(400,'Employee name is required')
     with transaction(immediate=True)as c:
-        c.execute('UPDATE employees SET employee_code=?,name=?,department_id=?,position=?,email=?,payroll_number=?,status=? WHERE id=?',(code,name,body['department_id'],body.get('position'),str(body.get('email')or'').strip()or None,str(body.get('payroll_number')or'').strip()or None,body.get('status')or'Active',employee_id))
-        log_audit(c,'employees',employee_id,'UPDATE',user['id'],after={'employee_code':code,'name':name,'department_id':body['department_id'],'employee_scope':'GENERAL'})
+        c.execute('UPDATE employees SET name=?,department_id=?,position=?,email=?,payroll_number=?,status=? WHERE id=?',(name,body['department_id'],body.get('position'),str(body.get('email')or'').strip()or None,str(body.get('payroll_number')or'').strip()or None,body.get('status')or'Active',employee_id))
+        log_audit(c,'employees',employee_id,'UPDATE',user['id'],after={'name':name,'department_id':body['department_id'],'employee_scope':'GENERAL'})
     return fetch_one('SELECT e.*,d.name department_name FROM employees e JOIN departments d ON d.id=e.department_id WHERE e.id=?',(employee_id,))
 
 @router.delete('/general-employees/{employee_id}')
@@ -75,17 +74,14 @@ def delete_general_employee(employee_id:int,user:dict=Depends(roles(*MGMT))):
     return {'success':True,'softDeleted':True}
 
 def create_company_employee(body:dict,user:dict):
-    name=str(body.get('name')or'').strip();requested_code=str(body.get('employee_code')or'').strip().upper()
+    name=str(body.get('name')or'').strip()
     try:department_id=int(body.get('department_id'))
     except (TypeError,ValueError):department_id=0
     if not name or department_id<=0:raise HTTPException(400,'Employee name and department are required')
     department=fetch_one('SELECT id,name FROM departments WHERE id=? AND deleted_at IS NULL',(department_id,))
     if not department:raise HTTPException(400,'Select a valid active department')
     if any(word in department['name'].strip().lower() for word in ('warehouse','procurement','purchas')):raise HTTPException(400,'Warehouse and Procurement employees must be created in Supply Chain Employees')
-    if requested_code and fetch_one('SELECT id FROM employees WHERE upper(employee_code)=upper(?)',(requested_code,)):raise HTTPException(409,f'Employee ID {requested_code} already exists')
-    if requested_code:code=requested_code
-    else:
-        seq=(fetch_one("SELECT MAX(CAST(SUBSTR(employee_code,5)AS INTEGER)) sequence FROM employees WHERE employee_code GLOB 'EMP-[0-9]*'")or{}).get('sequence')or 0;code=f'EMP-{seq+1:04d}'
+    seq=(fetch_one("SELECT MAX(CAST(SUBSTR(employee_code,5)AS INTEGER)) sequence FROM employees WHERE employee_code GLOB 'EMP-[0-9]*'")or{}).get('sequence')or 0;code=f'EMP-{seq+1:04d}'
     with transaction(immediate=True)as c:
         cur=c.execute("INSERT INTO employees(employee_code,name,first_name,last_name,department_id,position,email,payroll_number,status,approval_role,permission_keys,system_access_yn) VALUES(?,?,?,?,?,?,?,?,?,'Helper','[]',0)",(code,name,str(body.get('first_name')or'').strip()or None,str(body.get('last_name')or'').strip()or None,department_id,body.get('position'),str(body.get('email')or'').strip()or None,str(body.get('payroll_number')or'').strip()or None,body.get('status')or'Active'))
         log_audit(c,'employees',cur.lastrowid,'CREATE',user['id'],after={'employee_code':code,'name':name,'department_id':department_id,'employee_scope':'GENERAL'});eid=cur.lastrowid
@@ -102,11 +98,20 @@ def operational_items(_user: User):
 
 @router.get('/warehouses')
 def warehouses(user: User):
+    with transaction(immediate=True) as connection:
+        missing=connection.execute("SELECT id FROM warehouses WHERE trim(COALESCE(warehouse_code,''))='' ORDER BY id").fetchall()
+        used={str(row['warehouse_code']).upper() for row in connection.execute("SELECT warehouse_code FROM warehouses WHERE trim(COALESCE(warehouse_code,''))<>''")}
+        sequence=1
+        for row in missing:
+            while f'WH{sequence:02d}' in used:sequence+=1
+            code=f'WH{sequence:02d}';connection.execute('UPDATE warehouses SET warehouse_code=? WHERE id=?',(code,row['id']));used.add(code);sequence+=1
     ids=user['warehouse_ids']
-    rows=fetch_all('SELECT * FROM warehouses WHERE deleted_at IS NULL ORDER BY name')if user['role']=='SupplyChainManager'else fetch_all(f"SELECT * FROM warehouses WHERE deleted_at IS NULL AND id IN({','.join('?'for _ in ids)or'NULL'}) ORDER BY name",ids)
+    company_scope=user['role'] in ['SupplyChainManager','PurchaseManager','PurchaseOfficer']
+    rows=fetch_all('SELECT * FROM warehouses WHERE deleted_at IS NULL ORDER BY name')if company_scope else fetch_all(f"SELECT * FROM warehouses WHERE deleted_at IS NULL AND id IN({','.join('?'for _ in ids)or'NULL'}) ORDER BY name",ids)
     for row in rows:
         try:row['operating_days']=json.loads(row.get('operating_days_json')or'[]')
         except ValueError:row['operating_days']=[]
+        row.pop('replenishment_days_json',None);row.pop('auto_replenishment_enabled',None)
         row['operating_schedule']=fetch_all('SELECT weekday,is_open,open_time,close_time,cross_midnight_yn FROM warehouse_operating_schedules WHERE warehouse_id=? ORDER BY weekday',(row['id'],))
     return rows
 
@@ -193,8 +198,12 @@ def delete_warehouse(warehouse_id:int,body:dict,user:dict=Depends(roles('SupplyC
 def locations(user: User):
     ids=user['warehouse_ids']
     select_sql='SELECT l.*,w.name warehouse_name,w.site_name,p.code parent_code,p.label parent_label FROM locations l JOIN warehouses w ON w.id=l.warehouse_id LEFT JOIN locations p ON p.id=l.parent_id WHERE l.deleted_at IS NULL'
-    if user['role']=='SupplyChainManager':return fetch_all(select_sql+' ORDER BY w.name,l.code')
-    return fetch_all(select_sql+f" AND l.warehouse_id IN({','.join('?'for _ in ids)or'NULL'}) ORDER BY w.name,l.code",ids)
+    rows=fetch_all(select_sql+(' ORDER BY w.name,l.code'if user['role']=='SupplyChainManager'else f" AND l.warehouse_id IN({','.join('?'for _ in ids)or'NULL'}) ORDER BY w.name,l.code"),()if user['role']=='SupplyChainManager'else ids);by_id={row['id']:row for row in rows}
+    for row in rows:
+        path=[];cursor=row;seen=set()
+        while cursor and cursor['id']not in seen:seen.add(cursor['id']);path.append(cursor.get('label')or cursor.get('code'));cursor=by_id.get(cursor.get('parent_id'))
+        row['hierarchy_path']=' > '.join(reversed(path));row['is_terminal_storage']=is_terminal_storage_location(row)
+    return rows
 
 def warehouse_window(body,existing=None):
     start=str(body.get('operating_start_time')or(existing or{}).get('operating_start_time')or'00:00')[:5]
@@ -232,7 +241,7 @@ def warehouse_operating_configuration(body,existing=None):
 def save_operating_schedule(connection,warehouse_id,days,start,end,operation_24h,schedules,user_id):
     configured={int(row['weekday']):row for row in(schedules or[])}
     for weekday in range(7):
-        row=configured.get(weekday);is_open=int(bool(row.get('is_open')))if row is not None else int(operation_24h or weekday in days)
+        row=configured.get(weekday);is_open=int(weekday in days and bool(row.get('is_open')))if row is not None else int(weekday in days)
         open_time='00:00'if operation_24h else(str(row.get('open_time'))[:5]if row and is_open else start if is_open else None)
         close_time='00:00'if operation_24h else(str(row.get('close_time'))[:5]if row and is_open else end if is_open else None)
         cross=int(bool(is_open and close_time<=open_time))
@@ -248,8 +257,8 @@ def automatic_shift_design(start,duration):
     if duration<=480:
         break_minutes=30 if duration>=360 else(15 if duration>=240 else 0);offsets=[0];scheduled_lengths=[duration]
     else:
-        break_minutes=30;scheduled_minutes=510;final_offset=duration-scheduled_minutes
-        count=max(2,(final_offset+389)//390+1)
+        break_minutes=30;scheduled_minutes=480;final_offset=duration-scheduled_minutes
+        count=max(2,(final_offset+359)//360+1)
         offsets=[0]
         for index in range(1,count-1):
             raw_start=start_minutes+(index*final_offset/(count-1));standard_start=int((raw_start+15)//30)*30
@@ -289,9 +298,12 @@ def create_warehouse_shifts(connection,warehouse_id,start,duration,shifts_enable
 
 @router.post('/warehouses',status_code=201)
 def create_warehouse(body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager'))):
+    body={key:value for key,value in body.items() if key!='warehouse_code'}
     start,end,duration=warehouse_window(body);time_zone,operation_24h,days,schedules=warehouse_operating_configuration(body);body={**body,'operating_start_time':start,'operating_end_time':end,'time_zone':time_zone,'operation_24h_yn':operation_24h,'operating_days_json':json.dumps(days),'shifts_enabled_yn':int(bool(body.get('shifts_enabled_yn',1)))}
-    fields=['warehouse_code','name','site_type','site_name','address','city','country_code','city_id','postal_code','region_province','operating_start_time','operating_end_time','time_zone','operation_24h_yn','operating_days_json','shifts_enabled_yn'];keys=[k for k in fields if body.get(k)not in[None,'']]
+    body['auto_replenishment_enabled']=0
+    fields=['warehouse_code','name','site_type','site_name','address','city','country_code','city_id','postal_code','region_province','operating_start_time','operating_end_time','time_zone','operation_24h_yn','operating_days_json','shifts_enabled_yn','auto_replenishment_enabled'];keys=[k for k in fields if body.get(k)not in[None,'']]
     with transaction(immediate=True)as c:
+        sequence=c.execute('SELECT COALESCE(MAX(id),0)+1 n FROM warehouses').fetchone()['n'];body['warehouse_code']=f'WH{sequence:02d}';keys=['warehouse_code',*keys]
         cur=c.execute(f"INSERT INTO warehouses({','.join(keys)})VALUES({','.join('?'for _ in keys)})",tuple(body[k]for k in keys));rid=cur.lastrowid;create_warehouse_shifts(c,rid,start,duration,bool(body['shifts_enabled_yn']));save_operating_schedule(c,rid,days,start,end,operation_24h,schedules,user['id']);log_audit(c,'warehouses',rid,'CREATE',user['id'],after={**body,'operating_duration_minutes':duration,'operating_schedule':schedules})
     return fetch_one('SELECT * FROM warehouses WHERE id=?',(rid,))
 
@@ -318,43 +330,267 @@ def update_warehouse(warehouse_id:int,body:dict,user:dict=Depends(roles('SupplyC
         log_audit(c,'warehouses',warehouse_id,'UPDATE',user['id'],existing,{**values,'operating_duration_minutes':duration,'operating_schedule':schedules,'automatic_shift_design':automatic_shift_design(start,duration)if times_changed and values['shifts_enabled_yn']else None,'manager_confirmed':bool(body.get('confirm_shift_design'))})
     return fetch_one('SELECT * FROM warehouses WHERE id=?',(warehouse_id,))
 
+LOCATION_PARENTS={'Zone':set(),'Aisle':{'Zone'},'Rack':{'Zone','Aisle'},'Shelf':{'Rack'},'Bin':{'Zone','Aisle','Rack','Shelf'},'Bay':{'Zone'},'Yard Slot':{'Zone'},'Ground Stack':{'Zone'},'Open Area':{'Zone'},'Staging':{'Zone'}}
+STRUCTURE_CHILD={'AISLE_RACK_SHELF_BIN':'Aisle','RACK_SHELF_BIN':'Rack','RACK':'Rack','BAY':'Bay','YARD_SLOT':'Yard Slot','GROUND_STACK':'Ground Stack','BIN_ONLY':'Bin','STAGING':'Staging'}
+TYPE_PREFIX={'Aisle':'A','Rack':'R','Shelf':'S','Bin':'B','Bay':'BAY','Yard Slot':'SLOT','Ground Stack':'GS','Staging':'STAGE'}
+
+def _location_code(connection,warehouse,parent,location_type,sequence):
+    segment=f"{TYPE_PREFIX[location_type]}{sequence:02d}";return f"{parent['code']}-{segment}" if parent else segment
+
+def _validate_structure(parent,child_type):
+    structure=str(parent.get('structure_type')or'').upper()
+    allowed={'AISLE_RACK_SHELF_BIN':{'Zone':{'Aisle'},'Aisle':{'Rack'},'Rack':{'Shelf'},'Shelf':{'Bin'}},'RACK_SHELF_BIN':{'Zone':{'Rack'},'Rack':{'Shelf'},'Shelf':{'Bin'}},'RACK':{'Zone':{'Rack'}},'BAY':{'Zone':{'Bay'}},'YARD_SLOT':{'Zone':{'Yard Slot'}},'GROUND_STACK':{'Zone':{'Ground Stack'}},'BIN_ONLY':{'Zone':{'Bin'}},'STAGING':{'Zone':{'Staging'}}}
+    children=allowed.get(structure,{}).get(parent['type'],set())
+    if child_type not in children:
+        if structure=='RACK_SHELF_BIN'and parent['type']=='Rack'and child_type=='Bin':raise HTTPException(400,'Bins must be created under a Shelf for this storage structure.')
+        raise HTTPException(400,f'{child_type} cannot be created under {parent["type"]} for the {structure or "configured"} storage structure')
+
 @router.post('/locations',status_code=201)
-def create_location(body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager','WarehouseSupervisor'))):
+def create_location(body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager'))):
     try:warehouse_id=int(body.get('warehouse_id'))
     except(TypeError,ValueError):raise HTTPException(400,'Select a warehouse site')
     if user['role']!='SupplyChainManager'and warehouse_id not in user['warehouse_ids']:raise HTTPException(403,'Warehouse access denied')
     warehouse=fetch_one('SELECT id,warehouse_code FROM warehouses WHERE id=? AND deleted_at IS NULL',(warehouse_id,))
     if not warehouse:raise HTTPException(400,'Selected warehouse does not exist')
-    location_type=str(body.get('type')or'').title();allowed_parents={'Zone':set(),'Aisle':{'Zone'},'Rack':{'Zone','Aisle'},'Shelf':{'Rack'},'Bin':{'Zone','Aisle','Rack','Shelf'}}
+    location_type=str(body.get('type')or'').title();allowed_parents=LOCATION_PARENTS
     if location_type not in allowed_parents:raise HTTPException(400,'Select a valid storage level')
     parent_id=body.get('parent_id')
     if location_type!='Zone':
         try:parent_id=int(parent_id)
         except(TypeError,ValueError):raise HTTPException(400,f'Select a parent location for the {location_type}')
-        parent=fetch_one('SELECT id,type,warehouse_id FROM locations WHERE id=? AND deleted_at IS NULL',(parent_id,))
+        parent=fetch_one('SELECT * FROM locations WHERE id=? AND deleted_at IS NULL AND COALESCE(active_yn,1)=1',(parent_id,))
         if not parent or parent['warehouse_id']!=warehouse_id or parent['type']not in allowed_parents[location_type]:raise HTTPException(400,f'The selected parent is not valid for this {location_type}')
-    else:parent_id=None
+        _validate_structure(parent,location_type)
+    else:
+        parent_id=None
+        body={**body,'structure_type':body.get('structure_type')or'RACK_SHELF_BIN','storage_classification':body.get('storage_classification')or'GENERAL','environment':body.get('environment')or'INDOOR'}
     body={**body,'warehouse_id':warehouse_id,'type':location_type,'parent_id':parent_id}
-    fields=['warehouse_id','parent_id','code','type','label','location_type','storage_type','status','max_quantity','max_weight','max_volume','allowed_category','restricted_category','temperature_requirement','hazardous_material','inspection_required','cycle_count_frequency_days'];
+    if parent_id:
+        for inherited in ('structure_type','storage_classification','environment'):
+            if not body.get(inherited):body[inherited]=parent.get(inherited)
+    fields=['warehouse_id','parent_id','code','type','label','location_type','storage_type','status','max_quantity','max_weight','max_volume','allowed_category','restricted_category','temperature_requirement','hazardous_material','inspection_required','cycle_count_frequency_days','storage_classification','environment','structure_type','capacity_quantity','capacity_uom','secure_storage','temperature_controlled','mixing_rule','active_yn','full_code'];
     with transaction(immediate=True)as c:
         if not str(body.get('code')or'').strip():
-            suffix={'Zone':'ZN','Aisle':'AL','Rack':'RK','Shelf':'SH','Bin':'BN'}[location_type];prefix=f"{warehouse['warehouse_code']}-{suffix}-"
-            numbers=[int(str(row['code']).rsplit('-',1)[-1])for row in c.execute('SELECT code FROM locations WHERE code LIKE ?',(prefix+'%',)).fetchall()if str(row['code']).rsplit('-',1)[-1].isdigit()]
-            body['code']=f'{prefix}{(max(numbers)if numbers else 0)+1:04d}'
-        body['code']=str(body['code']).strip().upper();keys=[k for k in fields if body.get(k)not in[None,'']]
+            if location_type=='Zone':
+                prefix=f"{warehouse['warehouse_code']}-Z";numbers=[int(str(row['code']).rsplit('-Z',1)[-1])for row in c.execute('SELECT code FROM locations WHERE warehouse_id=? AND parent_id IS NULL',(warehouse_id,)).fetchall()if str(row['code']).rsplit('-Z',1)[-1].isdigit()];body['code']=f'{prefix}{(max(numbers)if numbers else 0)+1:02d}'
+            else:
+                parent=dict(c.execute('SELECT * FROM locations WHERE id=?',(parent_id,)).fetchone());count=c.execute('SELECT COUNT(*) n FROM locations WHERE parent_id=? AND type=?',(parent_id,location_type)).fetchone()['n'];body['code']=_location_code(c,warehouse,parent,location_type,count+1)
+        body['code']=str(body['code']).strip().upper();body['full_code']=body['code'];keys=[k for k in fields if body.get(k)not in[None,'']]
         cur=c.execute(f"INSERT INTO locations({','.join(keys)})VALUES({','.join('?'for _ in keys)})",tuple(body[k]for k in keys));rid=cur.lastrowid;log_audit(c,'locations',rid,'CREATE',user['id'],after=body)
     return fetch_one('SELECT * FROM locations WHERE id=?',(rid,))
 
 @router.put('/locations/{location_id}')
-def update_location(location_id:int,body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager','WarehouseSupervisor'))):
+def update_location(location_id:int,body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager'))):
     existing=fetch_one('SELECT * FROM locations WHERE id=? AND deleted_at IS NULL',(location_id,))
     if not existing:raise HTTPException(404,'Storage location not found')
     if user['role']!='SupplyChainManager'and existing['warehouse_id']not in user['warehouse_ids']:raise HTTPException(403,'Warehouse access denied')
-    fields=['label','location_type','storage_type','status','max_quantity','max_weight','max_volume','allowed_category','restricted_category','temperature_requirement','hazardous_material','inspection_required','cycle_count_frequency_days'];keys=[key for key in fields if key in body]
+    fields=['label','location_type','storage_type','status','max_quantity','max_weight','max_volume','allowed_category','restricted_category','temperature_requirement','hazardous_material','inspection_required','cycle_count_frequency_days','storage_classification','environment','structure_type','capacity_quantity','capacity_uom','secure_storage','temperature_controlled','mixing_rule','active_yn'];keys=[key for key in fields if key in body]
+    if ('active_yn'in body and not body['active_yn'])or body.get('status')=='Inactive':
+        descendants=fetch_all('''WITH RECURSIVE tree(id)AS(SELECT id FROM locations WHERE id=? UNION ALL SELECT l.id FROM locations l JOIN tree t ON l.parent_id=t.id)SELECT id FROM tree''',(location_id,));ids=[x['id']for x in descendants];marks=','.join('?'for _ in ids);holders=fetch_one(f"SELECT COALESCE((SELECT SUM(quantity)FROM inventory_stock WHERE location_id IN({marks})),0)+COALESCE((SELECT SUM(quantity)FROM inventory_quarantine WHERE released_at IS NULL AND location_id IN({marks})),0) quantity",ids+ids)
+        if holders and float(holders.get('quantity')or 0)>0:raise HTTPException(409,f"{existing['type']} {existing['code']} cannot be deactivated because available or restricted inventory exists in it or a child location")
     if not keys:raise HTTPException(400,'No editable location fields were supplied')
     with transaction(immediate=True)as c:
         c.execute(f"UPDATE locations SET {','.join(key+'=?'for key in keys)},modified_by=?,modified_at=datetime('now') WHERE id=?",tuple(body[key]for key in keys)+(user['id'],location_id));log_audit(c,'locations',location_id,'UPDATE',user['id'],existing,body)
     return fetch_one('SELECT * FROM locations WHERE id=?',(location_id,))
+
+@router.delete('/locations/{location_id}/permanent')
+def delete_empty_location(location_id:int,user:dict=Depends(roles('SupplyChainManager'))):
+    existing=fetch_one('SELECT * FROM locations WHERE id=? AND deleted_at IS NULL',(location_id,))
+    if not existing:raise HTTPException(404,'Storage location not found')
+    with transaction(immediate=True)as c:
+        tree=c.execute('''WITH RECURSIVE branch(id,depth)AS(
+          SELECT id,0 FROM locations WHERE id=?
+          UNION ALL SELECT l.id,b.depth+1 FROM locations l JOIN branch b ON l.parent_id=b.id
+        )SELECT id,depth FROM branch ORDER BY depth DESC''',(location_id,)).fetchall()
+        ids=[row['id']for row in tree];marks=','.join('?'for _ in ids);references=[]
+        tables=[row['name']for row in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        for table in tables:
+            if table=='locations':continue
+            for foreign_key in c.execute(f'PRAGMA foreign_key_list("{table}")').fetchall():
+                if foreign_key['table']!='locations':continue
+                column=foreign_key['from'];count=c.execute(f'SELECT COUNT(*) n FROM "{table}" WHERE "{column}" IN({marks})',ids).fetchone()['n']
+                if count:references.append(f'{table}.{column} ({count})')
+        if references:raise HTTPException(409,'This storage branch cannot be deleted because it has inventory or operational history: '+', '.join(references))
+        before={'root':dict(existing),'location_ids':ids,'deleted_count':len(ids)}
+        for row in tree:c.execute('DELETE FROM locations WHERE id=?',(row['id'],))
+        log_audit(c,'locations',location_id,'DELETE',user['id'],before=before,after={'permanent':True,'empty_branch_verified':True})
+    return {'success':True,'deleted_count':len(ids),'deleted_location_ids':ids}
+
+@router.post('/locations/{parent_id}/generate',status_code=201)
+def generate_locations(parent_id:int,body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager'))):
+    parent=fetch_one('SELECT * FROM locations WHERE id=? AND deleted_at IS NULL AND active_yn=1',(parent_id,))
+    if not parent:raise HTTPException(404,'Active parent location not found')
+    if user['role']!='SupplyChainManager'and parent['warehouse_id']not in user['warehouse_ids']:raise HTTPException(403,'Warehouse access denied')
+    inferred='Rack'if parent['type']=='Aisle'else'Shelf'if parent['type']=='Rack'and parent.get('structure_type')in('RACK_SHELF_BIN','AISLE_RACK_SHELF_BIN')else'Bin'if parent['type']=='Shelf'else STRUCTURE_CHILD.get(parent.get('structure_type'))
+    child_type=str(body.get('type')or inferred or'').replace('_',' ').title()
+    if child_type not in LOCATION_PARENTS or parent['type']not in LOCATION_PARENTS[child_type]:raise HTTPException(400,'This child type is not valid for the selected parent structure')
+    _validate_structure(parent,child_type)
+    try:target=int(body.get('count'))
+    except(TypeError,ValueError):raise HTTPException(400,'Generation count must be a whole number')
+    if target<1 or target>500:raise HTTPException(400,'Generation count must be between 1 and 500')
+    warehouse=fetch_one('SELECT * FROM warehouses WHERE id=?',(parent['warehouse_id'],));created=[]
+    with transaction(immediate=True)as c:
+        existing=c.execute('SELECT COUNT(*) n FROM locations WHERE parent_id=? AND type=?',(parent_id,child_type)).fetchone()['n']
+        for sequence in range(existing+1,target+1):
+            code=_location_code(c,warehouse,parent,child_type,sequence);cur=c.execute('''INSERT INTO locations(warehouse_id,parent_id,code,full_code,type,label,location_type,status,active_yn,environment,storage_classification,structure_type)
+              VALUES(?,?,?,?,?,?,?,'Available',1,?,?,?)''',(parent['warehouse_id'],parent_id,code,code,child_type,f'{child_type} {sequence:02d}',child_type,parent.get('environment'),parent.get('storage_classification'),parent.get('structure_type')));created.append(cur.lastrowid);log_audit(c,'locations',cur.lastrowid,'CREATE',user['id'],after={'event':f'{child_type.upper()}_GENERATED','parent_id':parent_id,'code':code})
+    return {'created':len(created),'target_count':target,'location_ids':created}
+
+@router.post('/locations/{zone_id}/quick-setup',status_code=201)
+def quick_setup(zone_id:int,body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager'))):
+    zone=fetch_one("SELECT * FROM locations WHERE id=? AND type='Zone' AND deleted_at IS NULL AND active_yn=1",(zone_id,))
+    if not zone:raise HTTPException(404,'Active storage Zone not found')
+    if user['role']!='SupplyChainManager'and zone['warehouse_id']not in user['warehouse_ids']:raise HTTPException(403,'Warehouse access denied')
+    levels={'AISLE_RACK_SHELF_BIN':[('Aisle','aisles'),('Rack','racks_per_aisle'),('Shelf','shelves_per_rack'),('Bin','bins_per_shelf')],'RACK_SHELF_BIN':[('Rack','racks'),('Shelf','shelves_per_rack'),('Bin','bins_per_shelf')]}.get(zone.get('structure_type'))
+    if not levels:raise HTTPException(400,'Quick Setup is available only for the Aisle/Rack/Shelf/Bin structures')
+    parents=[zone];created={kind:0 for kind,_ in levels}
+    for kind,key in levels:
+        try:target=int(body.get(key)or 0)
+        except(TypeError,ValueError):raise HTTPException(400,f'{key.replace("_"," ").title()} must be a whole number')
+        if target<1 or target>100:raise HTTPException(400,f'{key.replace("_"," ").title()} must be between 1 and 100')
+        next_parents=[]
+        for parent in parents:
+            result=generate_locations(parent['id'],{'count':target},user);created[kind]+=result['created'];next_parents.extend(fetch_all('SELECT * FROM locations WHERE parent_id=? AND type=? AND deleted_at IS NULL ORDER BY code',(parent['id'],kind)))
+        parents=next_parents
+    return {'created':created,'total_created':sum(created.values()),'message':'Quick Setup completed without deleting or renumbering existing locations'}
+
+@router.get('/storage-rules')
+def storage_rules(user:dict=Depends(roles('SupplyChainManager','WarehouseManager'))):
+    return fetch_all('SELECT r.*,w.name preferred_warehouse_name FROM item_category_storage_rules r LEFT JOIN warehouses w ON w.id=r.preferred_warehouse_id ORDER BY r.category,r.priority,r.id')
+
+@router.post('/storage-rules',status_code=201)
+def create_storage_rule(body:dict,user:dict=Depends(roles('SupplyChainManager'))):
+    category=str(body.get('category')or'').strip()
+    if not category:raise HTTPException(400,'Item category is required')
+    fields=['category','storage_classification','environment','structure_type','secure_required','hazardous_required','temperature_controlled_required','preferred_warehouse_id','priority','active_yn'];data={**body,'category':category,'priority':int(body.get('priority')or 100),'active_yn':int(body.get('active_yn',1))}
+    with transaction(immediate=True)as c:keys=[x for x in fields if data.get(x)is not None];cur=c.execute(f"INSERT INTO item_category_storage_rules({','.join(keys)},created_by)VALUES({','.join('?'for _ in keys)},?)",tuple(data[x]for x in keys)+(user['id'],));log_audit(c,'item_category_storage_rules',cur.lastrowid,'CREATE',user['id'],after=data);rid=cur.lastrowid
+    return {'id':rid}
+
+def _location_compatible(item,location,inventory_status='AVAILABLE'):
+    classification=str(location.get('storage_classification')or'').upper()
+    if inventory_status in ('DAMAGED','REJECTED','INSPECTION_PENDING') and classification!='QUARANTINE':return False
+    if inventory_status=='REPAIR_PENDING' and classification not in ('REPAIR','QUARANTINE'):return False
+    if item.get('secure_storage_required')and not location.get('secure_storage'):return False
+    if item.get('hazardous_storage_required')and not location.get('hazardous_material'):return False
+    if item.get('temperature_controlled_required')and not location.get('temperature_controlled'):return False
+    return True
+
+def _capacity_in_base(item,location,value):
+    unit=str(location.get('capacity_uom')or item.get('uom')or'').upper();base=str(item.get('uom')or'').upper()
+    if unit==base:return float(value)
+    if unit==str(item.get('purchase_uom')or'').upper():return float(value)*float(item.get('conversion_factor')or 1)
+    raise ValueError('Location capacity UOM is not convertible to the item Base UOM')
+
+def _putaway_override_compatible(item,location,warehouse_id,quantity,inventory_status):
+    if not _location_compatible(item,location,inventory_status):return False
+    if location.get('deleted_at')or not location.get('active_yn')or location.get('status')in('Inactive','Blocked','Maintenance','Full')or not is_terminal_storage_location(location):return False
+    parent=fetch_one('SELECT active_yn,status FROM locations WHERE id=?',(location.get('parent_id'),))if location.get('parent_id')else None
+    if parent and(not parent.get('active_yn')or parent.get('status')=='Inactive'):return False
+    occupancy=(fetch_one('SELECT COALESCE(SUM(quantity),0) quantity FROM inventory_stock WHERE location_id=?',(location['id'],))or{}).get('quantity')or 0
+    capacity=location.get('capacity_quantity')or location.get('max_quantity')
+    try:base_capacity=None if capacity in(None,'')else _capacity_in_base(item,location,capacity)
+    except ValueError:return False
+    if base_capacity is not None and base_capacity-float(occupancy)+1e-6<float(quantity):return False
+    mixing=str(location.get('mixing_rule')or'MIXED_ITEMS_ALLOWED').upper()
+    if mixing=='EMPTY_ONLY'and float(occupancy)>1e-8:return False
+    if mixing=='SAME_ITEM_ONLY'and fetch_one('SELECT id FROM inventory_stock WHERE location_id=? AND item_id<>? AND quantity>0 LIMIT 1',(location['id'],item['id'])):return False
+    allowed=str(location.get('allowed_category')or'').strip();restricted=str(location.get('restricted_category')or'').strip()
+    if allowed and str(item.get('category')or'').lower()!=allowed.lower():return False
+    if restricted and str(item.get('category')or'').lower()==restricted.lower():return False
+    rules=fetch_all('SELECT * FROM item_category_storage_rules WHERE lower(category)=lower(?) AND active_yn=1 AND (preferred_warehouse_id IS NULL OR preferred_warehouse_id=?) ORDER BY priority,id',(item.get('category'),warehouse_id))
+    for rule in rules or[{}]:
+        classification=item.get('storage_classification_override')or rule.get('storage_classification');environment=item.get('environment_override')or rule.get('environment');structure=item.get('structure_type_override')or rule.get('structure_type')
+        if rule.get('secure_required')and not location.get('secure_storage'):continue
+        if rule.get('hazardous_required')and not location.get('hazardous_material'):continue
+        if rule.get('temperature_controlled_required')and not location.get('temperature_controlled'):continue
+        if classification and str(location.get('storage_classification')or'').upper()!=str(classification).upper():continue
+        if environment and str(location.get('environment')or'').upper()!=str(environment).upper():continue
+        if structure and str(location.get('structure_type')or'').upper()!=str(structure).upper() and str(location.get('type')or'').upper().replace(' ','_')!=str(structure).upper():continue
+        return True
+    return False
+
+@router.post('/putaway/recommend')
+def recommend_putaway(body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager','WarehouseSupervisor','Storekeeper'))):
+    warehouse_id=int(body.get('warehouse_id'));quantity=float(body.get('quantity')or 0);item=fetch_one('SELECT * FROM items WHERE id=? AND deleted_at IS NULL',(body.get('item_id'),))
+    if not item or quantity<=0:raise HTTPException(400,'Valid item and positive quantity are required')
+    if user['role']!='SupplyChainManager'and warehouse_id not in user['warehouse_ids']:raise HTTPException(403,'Warehouse access denied')
+    source_table=body.get('source_table');source_id=body.get('source_id')
+    if source_table=='inventory_quarantine':
+        hold=fetch_one("SELECT * FROM inventory_quarantine WHERE id=? AND warehouse_id=? AND item_id=? AND inventory_status='PUT_AWAY_PENDING' AND released_at IS NULL",(source_id,warehouse_id,item['id']))
+        if not hold or abs(float(hold['quantity'])-quantity)>.0001:raise HTTPException(409,'Put-away source is no longer pending or its quantity changed')
+    rules=fetch_all('SELECT * FROM item_category_storage_rules WHERE lower(category)=lower(?) AND active_yn=1 AND (preferred_warehouse_id IS NULL OR preferred_warehouse_id=?) ORDER BY priority,id',(item.get('category'),warehouse_id));inventory_status=str(body.get('inventory_status')or'AVAILABLE').upper();locations=fetch_all('''SELECT l.*,COALESCE((SELECT SUM(s.quantity) FROM inventory_stock s WHERE s.location_id=l.id),0) occupancy,COALESCE((SELECT SUM(s.quantity) FROM inventory_stock s WHERE s.location_id=l.id AND s.item_id=?),0) same_item FROM locations l WHERE l.warehouse_id=? AND l.deleted_at IS NULL AND l.active_yn=1 AND l.status NOT IN('Inactive','Blocked','Maintenance','Full') AND NOT EXISTS(SELECT 1 FROM locations p WHERE p.id=l.parent_id AND (p.active_yn=0 OR p.status='Inactive'))''',(item['id'],warehouse_id))
+    ranked=[]
+    for loc in locations:
+        if not is_terminal_storage_location(loc)or not _location_compatible(item,loc,inventory_status):continue
+        capacity=loc.get('capacity_quantity')or loc.get('max_quantity')
+        try:remaining=None if capacity in(None,'')else _capacity_in_base(item,loc,capacity)-float(loc['occupancy'])
+        except ValueError:continue
+        if remaining is not None and remaining+1e-6<quantity:continue
+        mixing=str(loc.get('mixing_rule')or'MIXED_ITEMS_ALLOWED').upper()
+        if mixing=='EMPTY_ONLY'and float(loc['occupancy'])>1e-8:continue
+        if mixing=='SAME_ITEM_ONLY'and float(loc['occupancy'])-float(loc['same_item'])>1e-8:continue
+        for rule in rules or[{}]:
+            classification=item.get('storage_classification_override')or rule.get('storage_classification');environment=item.get('environment_override')or rule.get('environment');structure=item.get('structure_type_override')or rule.get('structure_type')
+            if rule.get('secure_required')and not loc.get('secure_storage'):continue
+            if rule.get('hazardous_required')and not loc.get('hazardous_material'):continue
+            if rule.get('temperature_controlled_required')and not loc.get('temperature_controlled'):continue
+            if classification and str(loc.get('storage_classification')or'').upper()!=str(classification).upper():continue
+            if environment and str(loc.get('environment')or'').upper()!=str(environment).upper():continue
+            if structure and str(loc.get('structure_type')or'').upper()!=str(structure).upper() and str(loc.get('type')or'').upper().replace(' ','_')!=str(structure).upper():continue
+            ranked.append((int(rule.get('priority')or 100),0 if float(loc['same_item'])>0 else 1,-(remaining or 0),loc['code'],loc));break
+    if not ranked:raise HTTPException(409,'No active location has sufficient capacity and meets the mandatory storage requirements for this item')
+    selected=sorted(ranked,key=lambda x:x[:4])[0][4]
+    with transaction(immediate=True)as c:cur=c.execute('INSERT INTO putaway_recommendations(item_id,warehouse_id,quantity,inventory_status,recommended_location_id,reason,source_table,source_id,recommended_by)VALUES(?,?,?,?,?,?,?,?,?)',(item['id'],warehouse_id,quantity,inventory_status,selected['id'],'Highest-priority compatible active location with capacity',source_table,source_id,user['id']));log_audit(c,'putaway_recommendations',cur.lastrowid,'CREATE',user['id'],after={'event':'PUTAWAY_RECOMMENDED','location_id':selected['id'],'source_table':source_table,'source_id':source_id});recommendation_id=cur.lastrowid
+    compatible=[entry[4] for entry in sorted(ranked,key=lambda x:x[:4])]
+    return {'recommendation_id':recommendation_id,'location':selected,'compatible_locations':compatible,'reason':'Highest-priority compatible active terminal location with capacity'}
+
+@router.put('/putaway/{recommendation_id}/confirm')
+def confirm_putaway(recommendation_id:int,body:dict,user:dict=Depends(roles('SupplyChainManager','WarehouseManager','WarehouseSupervisor','Storekeeper'))):
+    recommendation=fetch_one("SELECT * FROM putaway_recommendations WHERE id=? AND status='RECOMMENDED'",(recommendation_id,))
+    if not recommendation:raise HTTPException(404,'Open put-away recommendation not found')
+    if user['role']!='SupplyChainManager'and recommendation['warehouse_id']not in user['warehouse_ids']:raise HTTPException(403,'Warehouse access denied')
+    selected_id=int(body.get('selected_location_id')or recommendation['recommended_location_id']);selected=fetch_one('SELECT * FROM locations WHERE id=? AND warehouse_id=?',(selected_id,recommendation['warehouse_id']))
+    item=fetch_one('SELECT * FROM items WHERE id=?',(recommendation['item_id'],))
+    if not selected or not _putaway_override_compatible(item,selected,recommendation['warehouse_id'],recommendation['quantity'],recommendation['inventory_status']):raise HTTPException(409,'Selected location does not meet the mandatory storage, status, structure, or capacity requirements for this item')
+    override=selected_id!=recommendation['recommended_location_id'];reason=str(body.get('override_reason')or'').strip()
+    if override and len(reason)<5:raise HTTPException(400,'An override reason is required when selecting another compatible location')
+    if recommendation.get('source_table')=='inventory_quarantine':
+        hold=fetch_one("SELECT * FROM inventory_quarantine WHERE id=? AND inventory_status='PUT_AWAY_PENDING' AND released_at IS NULL",(recommendation.get('source_id'),))
+        if not hold or int(hold['item_id'])!=int(item['id'])or abs(float(hold['quantity'])-float(recommendation['quantity']))>.0001:raise HTTPException(409,'Put-away source is no longer pending or its quantity changed')
+        with transaction(immediate=True)as c:
+            current=c.execute('SELECT released_at FROM inventory_quarantine WHERE id=?',(hold['id'],)).fetchone()
+            if current['released_at']:raise HTTPException(409,'This stock has already completed put-away. Refresh the queue')
+            linked_tool=c.execute('SELECT * FROM tools WHERE id=?',(hold.get('tool_id'),)).fetchone()
+            if linked_tool:
+                if float(hold['quantity'])!=1 or linked_tool['warehouse_id']!=recommendation['warehouse_id'] or linked_tool['employee_id']:raise HTTPException(409,'Tool does not match this put-away receipt')
+                c.execute("UPDATE tools SET location_id=?,condition='Good',status='Available' WHERE id=?",(selected_id,linked_tool['id']))
+                log_audit(c,'tools',linked_tool['id'],'UPDATE',user['id'],dict(linked_tool),{'event':'TRANSFER_PUTAWAY','location_id':selected_id,'hold_id':hold['id']})
+            if hold.get('source_grn_item_id'):
+                pending_tools=c.execute("SELECT id FROM tools WHERE source_grn_item_id=? AND location_id IS NULL AND condition='Good' ORDER BY source_unit_number",(hold['source_grn_item_id'],)).fetchall()
+                if pending_tools:
+                    quantity=float(hold['quantity'])
+                    if not quantity.is_integer() or quantity>len(pending_tools):raise HTTPException(409,'Controlled tool put-away requires matching whole pending units')
+                    for pending_tool in pending_tools[:int(quantity)]:
+                        c.execute('UPDATE tools SET location_id=? WHERE id=?',(selected_id,pending_tool['id']))
+                        log_audit(c,'tools',pending_tool['id'],'UPDATE',user['id'],after={'event':'GRN_PUTAWAY','location_id':selected_id,'hold_id':hold['id']})
+            receive(c,item_id=item['id'],warehouse_id=recommendation['warehouse_id'],location_id=selected_id,quantity=float(hold['quantity']),unit_cost=float(hold['unit_cost']),batch=hold.get('batch'),expiry_date=hold.get('expiry_date'),source_grn_item_id=linked_tool['source_grn_item_id'] if linked_tool else hold.get('source_grn_item_id'),transaction_type='PUTAWAY_IN',reference_number=f'PUT-{recommendation_id}',reference_table='putaway_recommendations',reference_id=recommendation_id,created_by=user['id'])
+            c.execute("UPDATE inventory_quarantine SET released_at=datetime('now'),released_by=? WHERE id=?",(user['id'],hold['id']));c.execute("UPDATE putaway_recommendations SET selected_location_id=?,status='CONFIRMED',override_reason=?,confirmed_by=?,confirmed_at=datetime('now') WHERE id=?",(selected_id,reason or None,user['id'],recommendation_id));log_audit(c,'putaway_recommendations',recommendation_id,'UPDATE',user['id'],recommendation,{'event':'PUTAWAY_OVERRIDDEN'if override else'PUTAWAY_CONFIRMED','selected_location_id':selected_id,'quantity':hold['quantity'],'value':float(hold['quantity'])*float(hold['unit_cost']),'override_reason':reason})
+            if hold.get('source_grn_item_id'):
+                from ..receiving import refresh_receipt_status
+                linked=c.execute('SELECT g.po_id FROM grn_items gi JOIN grns g ON g.id=gi.grn_id WHERE gi.id=?',(hold['source_grn_item_id'],)).fetchone()
+                if linked:refresh_receipt_status(c,linked['po_id'])
+        return {'success':True,'status':'CONFIRMED','inventory_status':'AVAILABLE','selected_location_id':selected_id,'override':override}
+    source_id=body.get('source_location_id')
+    if source_id and int(source_id)!=selected_id:
+        source=fetch_one('SELECT * FROM locations WHERE id=? AND warehouse_id=?',(source_id,recommendation['warehouse_id']))
+        if not source:raise HTTPException(400,'Source location is not in the receiving warehouse')
+        with transaction(immediate=True)as c:
+            _cost,layers=consume(c,item_id=item['id'],warehouse_id=recommendation['warehouse_id'],location_id=int(source_id),quantity=recommendation['quantity'],transaction_type='PUTAWAY_OUT',reference_number=f'PUT-{recommendation_id}',reference_table='putaway_recommendations',reference_id=recommendation_id,created_by=user['id']);
+            for _layer_id,layer_quantity,unit_cost in layers:receive(c,item_id=item['id'],warehouse_id=recommendation['warehouse_id'],location_id=selected_id,quantity=layer_quantity,unit_cost=unit_cost,transaction_type='PUTAWAY_IN',reference_number=f'PUT-{recommendation_id}',reference_table='putaway_recommendations',reference_id=recommendation_id,created_by=user['id'])
+            c.execute("UPDATE putaway_recommendations SET selected_location_id=?,status='CONFIRMED',override_reason=?,confirmed_by=?,confirmed_at=datetime('now') WHERE id=?",(selected_id,reason or None,user['id'],recommendation_id));log_audit(c,'putaway_recommendations',recommendation_id,'UPDATE',user['id'],recommendation,{'event':'PUTAWAY_OVERRIDDEN'if override else'PUTAWAY_CONFIRMED','selected_location_id':selected_id,'override_reason':reason})
+    else:
+        with transaction(immediate=True)as c:c.execute("UPDATE putaway_recommendations SET selected_location_id=?,status='CONFIRMED',override_reason=?,confirmed_by=?,confirmed_at=datetime('now') WHERE id=?",(selected_id,reason or None,user['id'],recommendation_id));log_audit(c,'putaway_recommendations',recommendation_id,'UPDATE',user['id'],recommendation,{'event':'PUTAWAY_OVERRIDDEN'if override else'PUTAWAY_CONFIRMED','selected_location_id':selected_id,'override_reason':reason})
+    return {'success':True,'status':'CONFIRMED','selected_location_id':selected_id,'override':override}
 
 @router.post('/employees',status_code=201)
 def create_employee(body:dict,user:dict=Depends(roles(*MGMT))):

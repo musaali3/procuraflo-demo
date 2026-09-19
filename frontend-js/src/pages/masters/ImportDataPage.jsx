@@ -58,7 +58,7 @@ export default function ImportDataPage() {
     const url = URL.createObjectURL(new Blob([templates[type]], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${filenameType}-template.csv`;
+    link.download = `Procuraflo-${filenameType}-template.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -74,9 +74,9 @@ export default function ImportDataPage() {
     <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Mandatory item fields must be completed in every row. Opening balances additionally require warehouse, active Bin, quantity, unit cost and received date. One invalid row rejects the complete file without partial posting.</div>
     <div className="mt-4 grid gap-5 lg:grid-cols-3">
       {cards.map(([type, title, description]) => <section className="card p-5" key={type}>
-        <h2 className="font-semibold text-indigo-950">{title}</h2>
+        <h2 className="font-semibold text-blue-950">{title}</h2>
         <p className="mt-1 min-h-16 text-sm text-slate-500">{description}</p>
-        <input className="input mt-3" type="file" accept=".csv,.xlsx" onChange={event => setFiles(current => ({ ...current, [type]: event.target.files?.[0] }))} />
+        <input data-field="file" aria-label={title + " file"} className="input mt-3" type="file" accept=".csv,.xlsx" onChange={event => setFiles(current => ({ ...current, [type]: event.target.files?.[0] }))} />
         <div className="mt-3 flex flex-wrap gap-2"><button className="btn-secondary text-xs" onClick={() => downloadTemplate(type, "csv")}>CSV Template</button><button className="btn-secondary text-xs" onClick={() => downloadTemplate(type, "xlsx")}>Excel Template</button><button className="btn-primary" disabled={!files[type] || importing} onClick={() => upload(type)}>{importing ? "Importing…" : "Import"}</button></div>
       </section>)}
     </div>

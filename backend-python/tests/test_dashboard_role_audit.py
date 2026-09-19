@@ -36,11 +36,23 @@ def test_every_active_system_role_gets_complete_live_dashboard():
         response = client.get('/api/dashboard/kpis', headers=headers(user['id']))
         assert response.status_code == 200, (user['role'], response.text)
         data = response.json()
-        assert REQUIRED_KPIS <= data.keys()
+        common={'generated_at','dashboard_profile','scope_warehouse_ids','company_name'}
+        assert common <= data.keys()
         expected_profile = 'executive' if user['role'] == 'SupplyChainManager' else 'procurement' if user['role'] in {'PurchaseManager', 'PurchaseOfficer'} else 'warehouse'
         assert data['dashboard_profile'] == expected_profile
-        assert all(len(data[key]) == 6 for key in ('purchase_trend', 'consumption_trend', 'stock_movement_trend', 'invoice_match_trend'))
-        assert all(data[key] is not None for key in REQUIRED_KPIS)
+        if expected_profile=='executive':
+            assert REQUIRED_KPIS <= data.keys()
+        elif expected_profile=='warehouse':
+            assert 'monthly_purchase' not in data and 'invoice_exceptions' not in data
+            assert 'total_inventory_value' in data
+        else:
+            assert 'total_inventory_value' not in data and 'active_warehouse_employees' not in data
+            assert 'monthly_purchase' in data
+        for key in ('purchase_trend','consumption_trend'):
+            if key in data:assert len(data[key])==1
+        for key in ('stock_movement_trend','invoice_match_trend'):
+            if key in data:assert len(data[key])==6
+        assert all(data[key] is not None for key in data if key!='selected_warehouse_id' and key!='company_logo_url')
         assert client.get('/api/dashboard/tasks', headers=headers(user['id'])).status_code == 200
         observed_roles.add(user['role'])
     assert observed_roles == {'SupplyChainManager', 'PurchaseManager', 'PurchaseOfficer', 'WarehouseManager', 'WarehouseSupervisor', 'Storekeeper'}

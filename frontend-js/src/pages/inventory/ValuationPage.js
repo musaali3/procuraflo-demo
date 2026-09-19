@@ -4,17 +4,21 @@ import client from '../../api/client';
 import DataTable from '../../components/DataTable';
 import Modal from '../../components/Modal';
 import { formatCurrency } from '../../utils/currency';
+import useAutoRefresh from '../../hooks/useAutoRefresh';
 export default function ValuationPage() {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
     const [layers, setLayers] = useState(null);
     const [layerItem, setLayerItem] = useState(null);
-    useEffect(() => {
+    const load = () => {
+        setLoading(true);
         client
             .get('/inventory/valuation')
             .then((res) => setRows(res.data))
             .finally(() => setLoading(false));
-    }, []);
+    };
+    useAutoRefresh(load);
+    useEffect(() => { load(); }, []);
     function openLayers(row) {
         setLayerItem(row);
         client.get(`/inventory/valuation/${row.item_id}/layers`).then((res) => setLayers(res.data));

@@ -1,12 +1,15 @@
 {
-  "name": "procuraflow-frontend",
+  "name": "procuraflo-frontend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "validate:routes": "node scripts/validate-route-imports.mjs",
+    "validate:branding": "node scripts/validate-branding.mjs",
+    "validate:errors": "node scripts/validate-error-guidance.mjs"
   },
   "dependencies": {
     "axios": "^1.7.2",

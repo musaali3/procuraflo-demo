@@ -39,7 +39,7 @@ def _login_in_active_tenant(body:dict,request:Request,tenant_key:str):
         connection.execute('INSERT INTO login_history(user_id,username_attempted,success) VALUES(?,?,?)', (user['id'] if user else None, username, int(valid)))
     if not valid:
         if user and (not user['is_active'] or finance or not access or access.get('system_access_yn') == 0 or access.get('status') != 'Active'):
-            raise HTTPException(403, 'This employee has no ProcuraFlow system access')
+            raise HTTPException(403, 'This employee has no Procuraflo system access')
         raise HTTPException(401, 'Invalid username or password')
     if user.get('locked_reason'):
         raise HTTPException(423, f"Account temporarily locked: {user['locked_reason']}. Contact the Supply Chain Manager.")
@@ -72,9 +72,13 @@ def register_company(body:dict):
             with transaction(immediate=True)as connection:
                 selected_currency=str(body.get('base_currency')or'SAR').strip().upper()
                 connection.execute("INSERT INTO company(name,email,phone,country_code,currency,base_currency,time_zone,financial_year)VALUES(?,?,?,?,?,?,?,?)",(company_name,str(body.get('company_email')or'').strip()or None,str(body.get('company_phone')or'').strip()or None,str(body.get('country_code')or'SA'),selected_currency,selected_currency,str(body.get('time_zone')or'Asia/Riyadh'),str(body.get('financial_year')or'')))
-                department=connection.execute("SELECT id FROM departments WHERE lower(name)='administration' AND deleted_at IS NULL LIMIT 1").fetchone()
-                department_id=department['id']if department else connection.execute("INSERT INTO departments(name)VALUES('Administration')").lastrowid
-                employee_id=connection.execute("INSERT INTO employees(employee_code,name,department_id,position,status,approval_role,system_access_yn,email)VALUES('EMP-0001',?,?,'Supply Chain Manager','Active','SupplyChainManager',1,?)",(admin_name,department_id,str(body.get('admin_email')or'').strip()or None)).lastrowid
+                department=connection.execute("SELECT id FROM departments WHERE lower(name)='procurement' AND deleted_at IS NULL LIMIT 1").fetchone()
+                department_id=department['id']if department else connection.execute("INSERT INTO departments(name)VALUES('Procurement')").lastrowid
+                manager_permissions=json.dumps(defaults_for_role('SupplyChainManager'))
+                employee_id=connection.execute("""INSERT INTO employees(
+                  employee_code,name,department_id,position,status,approval_role,approval_limit,permission_keys,system_access_yn,email
+                )VALUES('EMP-0001',?,?,'Supply Chain Manager','Active','SupplyChainManager',0,?,1,?)""",
+                  (admin_name,department_id,manager_permissions,str(body.get('admin_email')or'').strip()or None)).lastrowid
                 connection.execute("INSERT INTO users(employee_id,username,password_hash,full_name,role,is_active,must_change_password,password_changed_at,password_expires_at)VALUES(?,?,?,?, 'SupplyChainManager',1,0,datetime('now'),datetime('now','+90 days'))",(employee_id,username,hashed,admin_name))
         register_tenant(key,company_name,target)
     except FileExistsError as error:
@@ -95,7 +99,7 @@ def registration_status():
 
 @router.get('/me')
 def me(user: User):
-    result = fetch_one('SELECT u.id,u.username,u.role,u.full_name,u.warehouse_id,w.name warehouse_name,u.must_change_password,u.password_expires_at,e.signature_url FROM users u LEFT JOIN warehouses w ON w.id=u.warehouse_id LEFT JOIN employees e ON e.id=u.employee_id WHERE u.id=?', (user['id'],)) or user
+    result = fetch_one('SELECT u.id,u.username,u.role,u.full_name,u.employee_id,u.warehouse_id,w.name warehouse_name,u.must_change_password,u.password_expires_at,e.signature_url FROM users u LEFT JOIN warehouses w ON w.id=u.warehouse_id LEFT JOIN employees e ON e.id=u.employee_id WHERE u.id=?', (user['id'],)) or user
     result['tenant_key']=user['tenant_key']
     result['permission_keys'] = permission_keys(user)
     result['warehouse_ids'] = authorized_warehouse_ids(user['id'])

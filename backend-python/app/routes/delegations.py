@@ -1,3 +1,4 @@
+from ..pr_workflow import scoped_report
 import json,sqlite3
 from datetime import datetime,timedelta
 from fastapi import APIRouter,Depends,HTTPException
@@ -54,7 +55,7 @@ def scope_options(scope_type:str,_u:dict=Depends(admin)):
     try:
         if scope_type=='INVOICE':return fetch_all("SELECT inv.id,inv.invoice_number||' - '||s.name||' - '||printf('%.2f',inv.invoice_total) label FROM invoices inv JOIN suppliers s ON s.id=inv.supplier_id ORDER BY inv.id DESC LIMIT 500")
         if scope_type=='WAREHOUSE':return fetch_all("SELECT id,warehouse_code||' - '||name label FROM warehouses WHERE deleted_at IS NULL ORDER BY name")
-        return fetch_all(f'SELECT id,{label} label FROM {table} ORDER BY id DESC LIMIT 500')
+        return scoped_report(f'SELECT id,{label} label FROM {table} ORDER BY id DESC LIMIT 500',_u)
     except sqlite3.OperationalError:return []
 @router.get('/mine')
 def mine(user:User):
@@ -73,7 +74,7 @@ def audit(_u:dict=Depends(admin)):return {'history':fetch_all("SELECT h.*,d.dele
 def create(body:dict,user:dict=Depends(admin)):
     delegator=fetch_one("SELECT e.id,e.name,e.approval_role FROM users u JOIN employees e ON e.id=u.employee_id WHERE u.id=? AND e.status='Active' AND e.deleted_at IS NULL",(user['id'],));delegate=fetch_one("""SELECT e.id,e.employee_code,e.name,e.approval_role,e.status,e.system_access_yn,u.id user_id,u.is_active FROM employees e JOIN users u ON u.employee_id=e.id AND u.deleted_at IS NULL WHERE e.id=? AND e.deleted_at IS NULL""",(body.get('delegate_employee_id'),))
     if not delegator or delegator['approval_role']!='SupplyChainManager':raise HTTPException(403,'Only an active Supply Chain Manager may delegate authority')
-    if not delegate or delegate['status']!='Active' or not delegate['is_active'] or delegate['system_access_yn']==0:raise HTTPException(400,'Delegate must have an active employee record and ProcuraFlow account')
+    if not delegate or delegate['status']!='Active' or not delegate['is_active'] or delegate['system_access_yn']==0:raise HTTPException(400,'Delegate must have an active employee record and Procuraflo account')
     department=ELIGIBLE_ROLES.get(delegate['approval_role']);authority=str(body.get('authority_code')or'');definition=AUTHORITIES.get(authority)
     if not department:raise HTTPException(403,'This employee role is not eligible for delegated authority')
     if not definition or definition[0]!=department:raise HTTPException(403,f'{department} employees may receive only {department} delegated authorities')

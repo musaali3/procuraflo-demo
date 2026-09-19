@@ -48,7 +48,7 @@ def test_excel_templates_download_as_valid_workbooks(tmp_path,monkeypatch):
         workbook=load_workbook(io.BytesIO(response.content),read_only=True,data_only=True)
         rows=list(workbook.active.values)
         assert len(rows)>=4
-        assert rows[0][0]=='ProcuraFlow - Precast Supply Chain Control System'
+        assert rows[0][0]=='Procuraflo - Supply Chain Control System'
         header=next(row for row in rows if sum(value not in(None,'')for value in row)>=2)
         assert all(header)
 

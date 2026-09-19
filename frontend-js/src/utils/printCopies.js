@@ -1,57 +1,35 @@
-import html2canvas from 'html2canvas';
+import { printFooterRules } from '../components/PrintBrandFooter';
+import { outputSource, outputError, documentClone, waitForImages } from './documentOutput';
 export const COMPANY_COPY = { title: 'COMPANY RECORD COPY', purpose: 'Official controlled copy — retain in the company document record.' };
-export function printControlledCopies(documentId, secondParty) {
-    return printControlledCopySet(documentId, documentId === 'finance-pack-print-document'
-        ? [FINANCE_PROCESSING_COPY, VENDOR_REFERENCE_COPY, WAREHOUSE_RECORD_COPY]
-        : [COMPANY_COPY, secondParty]);
-}
-export async function printControlledCopySet(documentId, copies) {
-    const source = document.getElementById(documentId);
-    if (!source)
-        throw new Error('Printable document is not available');
-    const outputText = String(source.textContent || '').replace(/\s+/g, ' ').toUpperCase();
-    const inferredAuthorization = /STATUS[: ]+(APPROVED|PRINTED|CLOSED|POSTED|RECEIVED|IN TRANSIT)/.test(outputText) || outputText.includes('GOODS RECEIPT NOTE') || (outputText.includes('PURCHASE REQUISITION') && !outputText.includes('PENDING APPROVAL'));
-    if (documentId.includes('document') && documentId !== 'report-print-document' && source.dataset.outputAuthorized !== 'true' && !(source.dataset.outputAuthorized == null && inferredAuthorization))
-        throw new Error('This document cannot be printed until its approval or authorized posting is complete');
-    if (!copies.length)
-        throw new Error('At least one print copy is required');
-    document.getElementById('dual-copy-print-root')?.remove();
-    const root = document.createElement('div');
-    root.id = 'dual-copy-print-root';
-    const financeCanvas = documentId === 'finance-pack-print-document'
-        ? await html2canvas(source, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false })
-        : null;
-    const financeImage = financeCanvas?.toDataURL('image/jpeg', .97);
-    copies.forEach((copy, index) => {
-        const page = document.createElement('section');
-        page.className = 'controlled-print-copy';
-        const marker = document.createElement('div');
-        marker.className = 'copy-control-marker';
-        marker.innerHTML = documentId === 'finance-pack-print-document'
-            ? `<strong>${copy.title}</strong><span>${copy.purpose}</span><em>Page 1 of 1</em>`
-            : `<strong>${copy.title}</strong><span>${copy.purpose}</span><em><i class="page-counter"></i></em>`;
-        if (financeImage) {
-            const image = document.createElement('img');
-            image.className = 'finance-print-image';
-            image.src = financeImage;
-            image.alt = 'External Finance handoff package';
-            page.append(image, marker);
-        }
-        else {
-            const clone = source.cloneNode(true);
-            clone.removeAttribute('id');
-            clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'));
-            clone.classList.add('controlled-document-clone');
-            page.append(clone, marker);
-        }
-        root.appendChild(page);
-    });
-    document.body.appendChild(root);
-    document.body.classList.add('dual-copy-print');
-    await Promise.all(Array.from(root.querySelectorAll('img')).map(image => image.decode().catch(() => undefined)));
-    const cleanup = () => { root.remove(); document.body.classList.remove('dual-copy-print'); window.removeEventListener('afterprint', cleanup); };
-    window.addEventListener('afterprint', cleanup, { once: true });
-    requestAnimationFrame(() => { window.print(); window.setTimeout(cleanup, 500); });
+export async function printControlledCopySet(documentId, copies, options={}) {
+    let root,style;
+    try {
+        const source=outputSource(documentId);
+        const DOCUMENT_FOOTER_RULES=await printFooterRules();
+        if(!copies?.length)throw new Error('Select at least one print copy.');
+        const landscape=options.orientation==='landscape'||source.classList.contains('executive-report');
+        document.getElementById('dual-copy-print-root')?.remove();document.getElementById('a4-print-rule')?.remove();
+        root=document.createElement('div');root.id='dual-copy-print-root';
+        style=document.createElement('style');style.id='a4-print-rule';
+        style.textContent=`@page {size:A4 ${landscape?'landscape':'portrait'};margin:10mm 10mm 26mm; ${DOCUMENT_FOOTER_RULES}} @media print {#dual-copy-print-root .controlled-print-copy {page:auto!important;} #dual-copy-print-root .controlled-document-clone {page:auto!important;width:100%!important;max-width:none!important;min-width:0!important;} body.dual-copy-print {width:auto!important;min-height:0!important;} #dual-copy-print-root {position:static!important;width:100%!important;} #dual-copy-print-root .executive-report {page:auto!important;} #dual-copy-print-root :is(.page-counter,.print-page-number)::after {content:none!important;} }`;
+        copies.forEach((copy,index)=>{
+            const page=document.createElement('section');page.className='controlled-print-copy';
+            page.append(documentClone(source));root.appendChild(page);
+            if(copy.title){
+
+                const label=JSON.stringify(copy.title);
+                style.textContent+=` @page {size:A4 ${landscape?'landscape':'portrait'};margin:10mm 10mm 26mm;${DOCUMENT_FOOTER_RULES} @bottom-center {content:${label}!important;vertical-align:top;padding-top:1mm;white-space:nowrap;font:bold 8pt Arial,sans-serif;color:#526671;} }`;
+            }
+        });
+        document.head.appendChild(style);document.body.appendChild(root);document.body.classList.add('dual-copy-print');
+        await waitForImages(root);
+        const footer=document.getElementById('procuraflo-print-footer');if(footer)await waitForImages(footer);
+        const cleanup=()=>{root?.remove();style?.remove();document.body.classList.remove('dual-copy-print');window.removeEventListener('afterprint',cleanup);};
+        window.addEventListener('afterprint',cleanup,{once:true});
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        window.print();
+        return {success:true};
+    } catch(error) {root?.remove();style?.remove();document.body.classList.remove('dual-copy-print');return outputError(error);}
 }
 export function printElement(documentId) {
     return printControlledCopySet(documentId, [COMPANY_COPY]);

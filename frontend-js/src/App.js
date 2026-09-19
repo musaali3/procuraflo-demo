@@ -5,53 +5,58 @@ import { useAuth } from "./contexts/AuthContext";
 import { useBranding } from "./contexts/BrandingContext";
 import Layout from "./components/Layout";
 import client from "./api/client";
-const Login = lazy(() => import("./pages/Login"));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
-const QuickStartPage = lazy(() => import("./pages/QuickStartPage"));
-const LiveUserActivityPage = lazy(() => import("./pages/LiveUserActivityPage"));
-const HelpPage = lazy(() => import("./pages/HelpPage"));
-const DepartmentsPage = lazy(() => import("./pages/masters/DepartmentsPage"));
+const Login = lazy(() => import("./pages/Login.jsx"));
+const Dashboard = lazy(() => import("./pages/Dashboard.js"));
+const QuickStartPage = lazy(() => import("./pages/QuickStartPage.jsx"));
+const LiveUserActivityPage = lazy(() => import("./pages/LiveUserActivityPage.js"));
+const HelpPage = lazy(() => import("./pages/HelpPage.js"));
+const DepartmentsPage = lazy(() => import("./pages/masters/DepartmentsPage.js"));
 const EmployeeMasterPage = lazy(
-  () => import("./pages/masters/EmployeeMasterPage"),
+  () => import("./pages/masters/EmployeeMasterPage.jsx"),
 );
-const SuppliersPage = lazy(() => import("./pages/masters/SuppliersPage"));
-const ItemsPage = lazy(() => import("./pages/masters/ItemsPage"));
-const WarehousesPage = lazy(() => import("./pages/masters/WarehousesPage"));
-const SettingsPage = lazy(() => import("./pages/masters/SettingsPage"));
-const ImportDataPage = lazy(() => import("./pages/masters/ImportDataPage"));
-const PRPage = lazy(() => import("./pages/procurement/PRPage"));
-const RFQPage = lazy(() => import("./pages/procurement/RFQPage"));
-const POPage = lazy(() => import("./pages/procurement/POPage"));
-const InvoicesPage = lazy(() => import("./pages/procurement/InvoicesPage"));
-const GRNPage = lazy(() => import("./pages/warehouse/GRNPage"));
+const SuppliersPage = lazy(() => import("./pages/masters/SuppliersPage.js"));
+const ItemsPage = lazy(() => import("./pages/masters/ItemsPage.js"));
+const WarehousesPage = lazy(() => import("./pages/masters/WarehousesPage.jsx"));
+const SettingsPage = lazy(() => import("./pages/masters/SettingsPage.js"));
+const ImportDataPage = lazy(() => import("./pages/masters/ImportDataPage.jsx"));
+const PRPage = lazy(() => import("./pages/procurement/PRPage.js"));
+const RFQPage = lazy(() => import("./pages/procurement/RFQPage.jsx"));
+const POPage = lazy(() => import("./pages/procurement/POPage.js"));
+const InvoicesPage = lazy(() => import("./pages/procurement/InvoicesPage.js"));
+const GRNPage = lazy(() => import("./pages/warehouse/GRNPage.js"));
+const ReceivingControlPage = lazy(() => import("./pages/warehouse/ReceivingControlPage.jsx"));
+const ReplenishmentCheckPage = lazy(() => import("./pages/warehouse/ReplenishmentCheckPage.jsx"));
 const MaterialIssuePage = lazy(
-  () => import("./pages/warehouse/MaterialIssuePage"),
+  () => import("./pages/warehouse/MaterialIssuePage.js"),
 );
-const ReturnsPage = lazy(() => import("./pages/warehouse/ReturnsPage"));
-const TransfersPage = lazy(() => import("./pages/warehouse/TransfersPage"));
+const ReturnsPage = lazy(() => import("./pages/warehouse/ReturnsPage.js"));
+const TransfersPage = lazy(() => import("./pages/warehouse/TransfersPage.js"));
 const BinTransfersPage = lazy(
-  () => import("./pages/warehouse/BinTransfersPage"),
+  () => import("./pages/warehouse/BinTransfersPage.js"),
 );
-const AdjustmentsPage = lazy(() => import("./pages/warehouse/AdjustmentsPage"));
-const StockPage = lazy(() => import("./pages/inventory/StockPage"));
-const ValuationPage = lazy(() => import("./pages/inventory/ValuationPage"));
-const ExpiryPage = lazy(() => import("./pages/inventory/ExpiryPage"));
-const ABCPage = lazy(() => import("./pages/inventory/ABCPage"));
-const DeadStockPage = lazy(() => import("./pages/inventory/DeadStockPage"));
-const CycleCountPage = lazy(() => import("./pages/inventory/CycleCountPage"));
-const ToolsPage = lazy(() => import("./pages/advanced/ToolsPage"));
+const AdjustmentsPage = lazy(() => import("./pages/warehouse/AdjustmentsPage.js"));
+const StockPage = lazy(() => import("./pages/inventory/StockPage.js"));
+const ValuationPage = lazy(() => import("./pages/inventory/ValuationPage.js"));
+const ExpiryPage = lazy(() => import("./pages/inventory/ExpiryPage.js"));
+const ABCPage = lazy(() => import("./pages/inventory/ABCPage.js"));
+const DeadStockPage = lazy(() => import("./pages/inventory/DeadStockPage.js"));
+const CycleCountPage = lazy(() => import("./pages/inventory/CycleCountPage.jsx"));
+const ToolsPage = lazy(() => import("./pages/advanced/ToolsPage.jsx"));
 const VendorScorecardPage = lazy(
-  () => import("./pages/advanced/VendorScorecardPage"),
+  () => import("./pages/advanced/VendorScorecardPage.jsx"),
 );
-const ReportsPage = lazy(() => import("./pages/reports/ReportsPage"));
-const WorkCalendarPage = lazy(() => import("./pages/WorkCalendarPage"));
+const ReportsPage = lazy(() => import("./pages/reports/ReportsPage.js"));
+const WarehouseDeactivationReportsPage = lazy(() => import("./pages/reports/WarehouseDeactivationReportsPage.jsx"));
+const ProcurementSchedulePage = lazy(() => import("./pages/ProcurementSchedulePage.jsx"));
+const WorkCalendarPage = lazy(() => import("./pages/WorkCalendarPage.js"));
 const WorkforceSetupPage = lazy(
-  () => import("./pages/EmployeeWorkforceSetupPage"),
+  () => import("./pages/EmployeeWorkforceSetupPage.jsx"),
 );
-const ReferenceDataPage = lazy(() => import("./pages/ReferenceDataPage"));
+const ReferenceDataPage = lazy(() => import("./pages/ReferenceDataPage.jsx"));
 const DelegatedAuthorityPage = lazy(
-  () => import("./pages/DelegatedAuthorityPage"),
+  () => import("./pages/DelegatedAuthorityPage.jsx"),
 );
+const EmployeeClearancePage = lazy(() => import("./pages/EmployeeClearancePage.jsx"));
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading)
@@ -90,7 +95,7 @@ export default function App() {
   return _jsx(Suspense, {
     fallback: _jsx("div", {
       className: "min-h-screen flex items-center justify-center text-slate-500",
-      children: "Loading ProcuraFlow workspace...",
+      children: "Loading Procuraflo workspace...",
     }),
     children: _jsxs(Routes, {
       children: [
@@ -232,16 +237,15 @@ export default function App() {
           }),
         }),
         _jsx(Route, {
-          path: "/procurement/pr",
+          path: "/employees/clearance",
           element: _jsx(RoleRoute, {
-            allowedRoles: [
-              "SupplyChainManager",
-              "PurchaseManager",
-              "PurchaseOfficer",
-              "WarehouseManager",
-              "WarehouseSupervisor",
-              "Storekeeper",
-            ],
+            allowedRoles: ["SupplyChainManager"],
+            children: _jsx(EmployeeClearancePage, {}),
+          }),
+        }),
+        _jsx(Route, {
+          path: "/procurement/pr",
+          element: _jsx(ProtectedRoute, {
             children: _jsx(PRPage, {}),
           }),
         }),
@@ -311,6 +315,18 @@ export default function App() {
               "Storekeeper",
             ],
             children: _jsx(PRPage, {}),
+          }),
+        }),
+        _jsx(Route, {
+          path: "/warehouse/replenishment",
+          element: _jsx(RoleRoute, {
+            allowedRoles: [
+              "SupplyChainManager",
+              "WarehouseManager",
+              "WarehouseSupervisor",
+              "Storekeeper",
+            ],
+            children: _jsx(ReplenishmentCheckPage, {}),
           }),
         }),
         _jsx(Route, {
@@ -473,6 +489,27 @@ export default function App() {
           element: _jsx(RoleRoute, {
             allowedRoles: ["SupplyChainManager", "PurchaseManager"],
             children: _jsx(VendorScorecardPage, {}),
+          }),
+        }),
+        _jsx(Route, {
+          path: "/procurement/operating-schedule",
+          element: _jsx(RoleRoute, {
+            allowedRoles: ["SupplyChainManager", "PurchaseManager"],
+            children: _jsx(ProcurementSchedulePage, {}),
+          }),
+        }),
+        _jsx(Route, {
+          path: "/warehouse/receiving-control",
+          element: _jsx(RoleRoute, {
+            allowedRoles: ["SupplyChainManager","WarehouseManager","WarehouseSupervisor","Storekeeper"],
+            children: _jsx(ReceivingControlPage, {}),
+          }),
+        }),
+        _jsx(Route, {
+          path: "/reports/warehouse-deactivations",
+          element: _jsx(RoleRoute, {
+            allowedRoles: ["SupplyChainManager"],
+            children: _jsx(WarehouseDeactivationReportsPage, {}),
           }),
         }),
         _jsx(Route, {

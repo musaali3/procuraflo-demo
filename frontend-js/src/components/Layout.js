@@ -1,15 +1,15 @@
+import HorizontalScroll from './HorizontalScroll';
+import PrintBrandFooter from './PrintBrandFooter';
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import client from "../api/client";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
-import { useBranding } from "../contexts/BrandingContext";
 import TableSortingEnhancer from "./TableSortingEnhancer";
 import ButtonThemeEnhancer from "./ButtonThemeEnhancer";
 import { useAuth } from "../contexts/AuthContext";
 export default function Layout({ children }) {
-  const { company, product } = useBranding();
   const location = useLocation();
   const {user,logout}=useAuth();
   const [backup,setBackup]=useState(null);
@@ -31,6 +31,7 @@ export default function Layout({ children }) {
   return _jsxs("div", {
     className: "app-workspace flex min-h-screen bg-transparent",
     children: [
+      _jsx(PrintBrandFooter, {}),
       _jsx(TableSortingEnhancer, {}),
       _jsx(ButtonThemeEnhancer, {}),
       _jsx(Sidebar, {}),
@@ -38,16 +39,11 @@ export default function Layout({ children }) {
         className: "relative z-[1] flex-1 min-w-0",
         children: [
           _jsx(Topbar, {}),
-          delegations.length>0&&_jsxs("div",{className:"border-b border-indigo-200 bg-indigo-50 px-5 py-2 text-sm text-indigo-950",children:[_jsx("strong",{children:"Temporary Delegated Authority Active: "}),delegations.map((row,index)=>_jsxs("span",{children:[index?" · ":"",row.authority_label," — ",row.scope_type.replaceAll('_',' ')," — valid until ",new Date(row.effective_until).toLocaleString()]},row.id))]}),
+          delegations.length>0&&_jsxs("div",{className:"border-b border-blue-200 bg-blue-50 px-5 py-2 text-sm text-blue-950",children:[_jsx("strong",{children:"Temporary Delegated Authority Active: "}),delegations.map((row,index)=>_jsxs("span",{children:[index?" · ":"",row.authority_label," — ",row.scope_type.replaceAll('_',' ')," — valid until ",new Date(row.effective_until).toLocaleString()]},row.id))]}),
           countdown&&_jsxs("div",{className:"sticky top-0 z-40 border-b border-amber-300 bg-amber-100 px-4 py-2 text-center text-sm font-semibold text-amber-950",children:["SYSTEM BACKUP NOTICE · Month-End Backup in ",countdown," · Save and complete current work. Scheduled local time: ",new Date(backup.scheduled_at).toLocaleString()," (",backup.display_time_zone,"). All sessions will be signed out at backup time."]}),
           _jsx("main", {
             className: "app-main p-6 max-w-7xl mx-auto",
-            children: children,
-          }),
-          _jsxs("footer", {
-            className:
-              "app-footer mx-auto max-w-7xl border-t border-slate-200 px-6 py-4 text-center text-xs text-slate-500",
-            children: [company.company_name, " | Powered by ", product.name],
+            children: _jsx(HorizontalScroll,{children}),
           }),
         ],
       }),

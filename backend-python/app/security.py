@@ -12,6 +12,8 @@ from .permissions import defaults_for_role
 
 bearer = HTTPBearer(auto_error=False)
 JWT_SECRET = os.getenv('JWT_SECRET', 'dev-secret-change-me').strip() or 'dev-secret-change-me'
+JWT_ALGORITHM = 'HS256'
+REQUIRED_TOKEN_CLAIMS = ['exp', 'iat', 'id', 'tenant_key', 'session_epoch']
 
 def authorized_warehouse_ids(user_id: int):
     role = fetch_one('SELECT role FROM users WHERE id=?', (user_id,))
@@ -30,7 +32,19 @@ def sign_token(payload: dict):
     maintenance=fetch_one('SELECT session_epoch FROM system_maintenance WHERE id=1')or{'session_epoch':1}
     data['session_epoch']=int(maintenance['session_epoch']);data['iat']=datetime.now(timezone.utc)
     data['exp'] = datetime.now(timezone.utc) + timedelta(hours=8)
-    return jwt.encode(data, JWT_SECRET, algorithm='HS256')
+    return jwt.encode(data, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def decode_token(token: str) -> dict:
+    """Verify a Procuraflo token before any claim is used for tenant selection."""
+    decoded = jwt.decode(
+        token,
+        JWT_SECRET,
+        algorithms=[JWT_ALGORITHM],
+        options={'require': REQUIRED_TOKEN_CLAIMS},
+    )
+    if not isinstance(decoded.get('id'), int) or not str(decoded.get('tenant_key') or '').strip():
+        raise jwt.InvalidTokenError('Invalid authentication context')
+    return decoded
 
 def permission_keys(user: dict):
     if user['role'] == 'SupplyChainManager':
@@ -45,12 +59,11 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     if not credentials:
         raise HTTPException(401, 'Missing or invalid Authorization header')
     try:
-        decoded = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=['HS256'])
+        decoded = decode_token(credentials.credentials)
     except jwt.PyJWTError:
         raise HTTPException(401, 'Invalid or expired token')
-    if not decoded.get('tenant_key'):raise HTTPException(401,'Session is missing its company security boundary. Sign in again.')
     maintenance=fetch_one('SELECT active_yn,session_epoch FROM system_maintenance WHERE id=1')or{'active_yn':0,'session_epoch':1}
-    if maintenance['active_yn']:raise HTTPException(503,'ProcuraFlow is temporarily unavailable while the scheduled month-end backup is being completed')
+    if maintenance['active_yn']:raise HTTPException(503,'Procuraflo is temporarily unavailable while the scheduled month-end backup is being completed')
     if int(decoded.get('session_epoch')or 0)!=int(maintenance['session_epoch']):raise HTTPException(401,'Your session ended for controlled system maintenance. Sign in again.')
     account = fetch_one('''SELECT u.id,u.username,u.role,u.full_name,u.is_active,u.locked_reason,u.deleted_at,
         u.password_expires_at,e.id employee_id,e.approval_limit,e.status employee_status,e.system_access_yn,e.signature_url,d.name department_name
@@ -58,7 +71,7 @@ def current_user(credentials: Annotated[HTTPAuthorizationCredentials | None, Dep
     if not account or account['deleted_at'] or not account['is_active']:
         raise HTTPException(401, 'Account is inactive or no longer available')
     if account['role'].lower() == 'finance' or str(account.get('department_name') or '').strip().lower() == 'finance' or account.get('system_access_yn') == 0 or account.get('employee_status') == 'Inactive':
-        raise HTTPException(403, 'This employee has no ProcuraFlow system access')
+        raise HTTPException(403, 'This employee has no Procuraflo system access')
     if account.get('locked_reason'):
         raise HTTPException(423, f"Account temporarily locked: {account['locked_reason']}")
     account['permission_keys'] = permission_keys(account)

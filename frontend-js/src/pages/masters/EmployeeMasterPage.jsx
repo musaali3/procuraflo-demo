@@ -49,7 +49,7 @@ export default function EmployeeMasterPage() {
                   { replace: true },
                 )
               }
-              className={`rounded-xl border px-4 py-3 text-left transition ${activeTab === tab.id ? "border-indigo-500 bg-indigo-50 text-indigo-950 shadow-sm ring-1 ring-indigo-200" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-indigo-300 hover:bg-white"}`}
+              className={`rounded-xl border px-4 py-3 text-left transition ${activeTab === tab.id ? "border-blue-500 bg-blue-50 text-blue-950 shadow-sm ring-1 ring-blue-200" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-300 hover:bg-white"}`}
             >
               <span className="block text-sm font-semibold">{tab.label}</span>
               <span className="mt-0.5 block text-xs opacity-75">

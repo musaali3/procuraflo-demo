@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -5,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app import database,tenancy
 from app.main import app
+from app.permissions import defaults_for_role
 
 
 def setup_tenants(tmp_path,monkeypatch):
@@ -31,7 +33,27 @@ def test_company_registration_login_and_database_isolation(tmp_path,monkeypatch)
         assert signed_in.status_code==200,signed_in.text
         assert signed_in.json()['user']['tenant_key']==key
         token=signed_in.json()['token']
-        me=client.get('/api/auth/me',headers={'Authorization':f'Bearer {token}','X-Company-Key':key})
+        headers={'Authorization':f'Bearer {token}','X-Company-Key':key}
+        supply_chain=client.get('/api/masters/employees',headers=headers)
+        assert supply_chain.status_code==200,supply_chain.text
+        administrator=next(row for row in supply_chain.json()if row['employee_code']=='EMP-0001')
+        assert administrator['department_name']=='Procurement'
+        assert administrator['position']=='Supply Chain Manager'
+        assert administrator['approval_role']=='SupplyChainManager'
+        assert administrator['system_access_yn']==1
+        assert set(json.loads(administrator['permission_keys']))==set(defaults_for_role('SupplyChainManager'))
+        updated=client.put(f"/api/masters/employees/{administrator['id']}",headers=headers,json={
+            'name':administrator['name'],'department_id':administrator['department_id'],
+            'position':'Supply Chain Manager','approval_role':'SupplyChainManager',
+            'approval_limit':250000,'permission_keys':administrator['permission_keys'],
+            'system_access_yn':1,'status':'Active',
+        })
+        assert updated.status_code==200,updated.text
+        assert updated.json()['approval_limit']==250000
+        company_employees=client.get('/api/masters/general-employees',headers=headers)
+        assert company_employees.status_code==200
+        assert all(row['id']!=administrator['id']for row in company_employees.json())
+        me=client.get('/api/auth/me',headers=headers)
         assert me.status_code==200 and me.json()['tenant_key']==key
         mismatch=client.get('/api/auth/me',headers={'Authorization':f'Bearer {token}','X-Company-Key':'beta-precast'})
         assert mismatch.status_code==401

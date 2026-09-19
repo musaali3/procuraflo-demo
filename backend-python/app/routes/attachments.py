@@ -8,16 +8,26 @@ from ..security import User
 from ..storage import upload_path
 
 router=APIRouter(prefix='/api/attachments',tags=['attachments']);DOCS=upload_path('documents')
-PROC=['SupplyChainManager','PurchaseManager','PurchaseOfficer'];WAREHOUSE=['SupplyChainManager','WarehouseManager','WarehouseSupervisor','Storekeeper'];ACCESS={'PR':PROC+['WarehouseManager','WarehouseSupervisor','Storekeeper'],'PO':PROC+['WarehouseManager','WarehouseSupervisor','Storekeeper'],'GRN':WAREHOUSE,'INVOICE':PROC,'MANUAL_APPROVAL':PROC,'RFQ':PROC,'QUOTATION':PROC,'AWARD':['SupplyChainManager','PurchaseManager']};UPLOAD={**ACCESS,'PO':PROC,'GRN':WAREHOUSE,'MANUAL_APPROVAL':['SupplyChainManager'],'RFQ':PROC,'QUOTATION':PROC,'AWARD':['SupplyChainManager','PurchaseManager']}
-def exists(kind,row_id):return fetch_one(f"SELECT id FROM {'purchase_requisitions' if kind=='PR' else 'purchase_orders' if kind in ['PO','MANUAL_APPROVAL'] else 'grns' if kind=='GRN' else 'invoices' if kind=='INVOICE' else 'rfqs' if kind=='RFQ' else 'rfq_awards' if kind=='AWARD' else 'supplier_quotations'} WHERE id=?",(row_id,))
+PROC=['SupplyChainManager','PurchaseManager','PurchaseOfficer'];WAREHOUSE=['SupplyChainManager','WarehouseManager','WarehouseSupervisor','Storekeeper'];ACCESS={'PR':PROC+['WarehouseManager','WarehouseSupervisor','Storekeeper'],'PO':PROC+['WarehouseManager','WarehouseSupervisor','Storekeeper'],'GRN':WAREHOUSE,'INVOICE':PROC,'ADJUSTMENT':WAREHOUSE,'MANUAL_APPROVAL':PROC,'RFQ':PROC,'QUOTATION':PROC,'AWARD':['SupplyChainManager','PurchaseManager']};UPLOAD={**ACCESS,'PO':PROC,'GRN':WAREHOUSE,'MANUAL_APPROVAL':['SupplyChainManager'],'RFQ':PROC,'QUOTATION':PROC,'AWARD':['SupplyChainManager','PurchaseManager']}
+def exists(kind,row_id):return fetch_one(f"SELECT id FROM {'purchase_requisitions' if kind=='PR' else 'purchase_orders' if kind in ['PO','MANUAL_APPROVAL'] else 'grns' if kind=='GRN' else 'invoices' if kind=='INVOICE' else 'stock_adjustments' if kind=='ADJUSTMENT' else 'rfqs' if kind=='RFQ' else 'rfq_awards' if kind=='AWARD' else 'supplier_quotations'} WHERE id=?",(row_id,))
 def check(kind,row_id,user,write=False):
     if kind not in ACCESS:raise HTTPException(400,'Invalid document type')
-    if user['role'] not in (UPLOAD if write else ACCESS)[kind]:raise HTTPException(403,'Your role cannot upload this document type' if write else 'Your role cannot access this document type')
+    if kind!='PR' and user['role'] not in (UPLOAD if write else ACCESS)[kind]:raise HTTPException(403,'Your role cannot upload this document type' if write else 'Your role cannot access this document type')
     if not exists(kind,row_id):raise HTTPException(404,'Document not found')
+    if kind=='PR':
+        from ..pr_workflow import require_pr_access
+        row=require_pr_access(fetch_one('SELECT * FROM purchase_requisitions WHERE id=?',(row_id,)),user)
+        if write and row.get('status')=='Draft':
+            from ..pr_workflow import require_pr_draft_management
+            require_pr_draft_management(row,user)
+        if write and user['role'] not in UPLOAD['PR'] and row.get('requestor_id')!=user['id']:raise HTTPException(403,'You may only upload supporting documents to your own PR')
     if user['role'] in ['WarehouseManager','WarehouseSupervisor','Storekeeper']:
         if kind=='GRN' and not fetch_one(f"SELECT 1 ok FROM grn_items WHERE grn_id=? AND warehouse_id IN({','.join('?' for _ in user['warehouse_ids']) or 'NULL'}) LIMIT 1",(row_id,*user['warehouse_ids'])):raise HTTPException(404,'Document not found')
-        if kind=='PO' and not fetch_one("SELECT 1 ok FROM purchase_orders WHERE id=? AND status IN('Approved','Printed')",(row_id,)):raise HTTPException(404,'Document not found')
-        if kind not in ['PR','PO','GRN']:raise HTTPException(404,'Document not found')
+        if kind=='PO':
+            from .procurement import require_po_access
+            require_po_access(user,row_id)
+        if kind=='ADJUSTMENT' and not fetch_one(f"SELECT 1 ok FROM stock_adjustments WHERE id=? AND warehouse_id IN({','.join('?' for _ in user['warehouse_ids']) or 'NULL'})",(row_id,*user['warehouse_ids'])):raise HTTPException(404,'Document not found')
+        if kind not in ['PR','PO','GRN','ADJUSTMENT']:raise HTTPException(404,'Document not found')
 def signature(data,mime):return (mime=='application/pdf' and data[:5]==b'%PDF-')or(mime=='image/png' and data[:8]==b'\x89PNG\r\n\x1a\n')or(mime=='image/jpeg' and data[:3]==b'\xff\xd8\xff')or(mime in['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/zip']and data[:2]==b'PK')
 @router.get('/file/{attachment_id}')
 def get_file(attachment_id:int,user:User):
