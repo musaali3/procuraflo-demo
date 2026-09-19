@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import database
 
-TENANT_ROOT = Path(os.getenv('TENANT_DATA_DIR',str(database.BACKEND_ROOT/'tenants'))).resolve()
+TENANT_ROOT = Path(os.getenv('TENANT_DATA_DIR', str(database.RUNTIME_DATA_DIR / 'tenants'))).resolve()
 REGISTRY_PATH = TENANT_ROOT / 'tenant-registry.db'
 TENANT_KEY = re.compile(r'^[a-z0-9][a-z0-9-]{2,47}$')
 REFERENCE_TABLES = ('countries','cities','currencies','item_categories','item_subcategories','settings','role_shift_requirements')

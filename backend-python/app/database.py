@@ -7,7 +7,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DB = BACKEND_ROOT / "procuraflow.db"
+PROJECT_ROOT = BACKEND_ROOT.parent
+RUNTIME_DATA_DIR = Path(os.getenv("RUNTIME_DATA_DIR", str(PROJECT_ROOT / "runtime-data"))).resolve()
+DEFAULT_DB = RUNTIME_DATA_DIR / "procuraflow.db"
 BOOTSTRAP_DB = Path(__file__).resolve().parent / "bootstrap.db"
 DB_PATH = Path(os.getenv("DB_PATH", str(DEFAULT_DB))).resolve()
 ACTIVE_DB_PATH: ContextVar[Path | None] = ContextVar('active_tenant_db_path', default=None)

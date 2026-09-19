@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 
-from .database import BACKEND_ROOT
+from .database import RUNTIME_DATA_DIR
 
 
-UPLOADS_ROOT = Path(os.getenv("UPLOADS_DIR", str(BACKEND_ROOT / "uploads"))).resolve()
-BACKUPS_ROOT = Path(os.getenv("BACKUPS_DIR", str(BACKEND_ROOT / "backups"))).resolve()
+UPLOADS_ROOT = Path(os.getenv("UPLOADS_DIR", str(RUNTIME_DATA_DIR / "uploads"))).resolve()
+BACKUPS_ROOT = Path(os.getenv("BACKUPS_DIR", str(RUNTIME_DATA_DIR / "backups"))).resolve()
 
 
 def upload_path(*parts: str) -> Path:

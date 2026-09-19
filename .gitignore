@@ -35,6 +35,7 @@ venv/
 *.sqlite
 *.sqlite3
 *.log
+runtime-data/
 backend-python/backups/
 backend-python/tenants/
 backend-python/uploads/
