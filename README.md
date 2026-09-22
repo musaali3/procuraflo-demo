@@ -27,7 +27,7 @@ For first-time setup, run these commands from the `ProcuraFlow` folder:
 ```powershell
 cd backend-python
 Copy-Item .env.example .env
-..\..\venv\Scripts\python.exe -m pip install -r requirements.txt
+..\..\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\run.ps1
 ```
 
@@ -45,7 +45,7 @@ Open `http://localhost:5174`. On a new installation, register the company and ad
 
 ```powershell
 cd backend-python
-..\..\venv\Scripts\python.exe -m pytest tests/test_smoke.py tests/test_database_bootstrap.py tests/test_tenant_registration_isolation.py
+..\..\.venv\Scripts\python.exe -m pytest tests/test_smoke.py tests/test_database_bootstrap.py tests/test_tenant_registration_isolation.py
 
 cd ..\frontend-js
 npm run build

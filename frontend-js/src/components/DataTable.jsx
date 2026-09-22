@@ -172,16 +172,19 @@ export default function DataTable({
   return (
     <div>
       {searchable && (
-        <div className="border-b border-slate-100 p-3">
-          <input data-field={"query"}
-            type="search"
-            autoComplete="off"
-            className="input w-full max-w-sm"
-            placeholder="Search this table..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <div className="mt-1 text-[11px] text-slate-400">
+        <div className="data-table-toolbar flex flex-col gap-3 border-b border-slate-100 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <label className="data-table-search relative block w-full max-w-md">
+            <span className="data-table-search-icon pointer-events-none absolute left-4 top-1/2 -translate-y-1/2" aria-hidden="true" />
+            <input data-field={"query"}
+              type="search"
+              autoComplete="off"
+              className="input w-full"
+              placeholder="Search records, codes, names..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <div className="data-table-count rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 shadow-sm">
             {query
               ? `${visibleRows.length} matching records`
               : `${rows.length} total records`}
@@ -246,9 +249,11 @@ export default function DataTable({
               <tr>
                 <td
                   colSpan={columns.length + 1}
-                  className="text-center py-8 text-slate-400"
+                  className="data-table-empty py-16 text-center text-slate-500"
                 >
-                  {emptyLabel}
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-blue-50 text-3xl font-semibold text-blue-600">D</div>
+                  <div className="mt-4 text-lg font-semibold text-slate-950">{emptyLabel}</div>
+                  <div className="mt-2 text-sm text-slate-500">Create a new record or adjust your search filters.</div>
                 </td>
               </tr>
             )}

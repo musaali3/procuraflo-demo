@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import client from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { PRODUCT_BRAND } from '../config/brand';
+import { ProductBrand } from '../components/Branding';
 
 const registrationInitial={company_name:'',company_key:'',company_email:'',admin_name:'',admin_email:'',username:'',password:'',confirm_password:''};
 
@@ -15,21 +16,31 @@ export default function Login(){
   async function handleLogin(event){event.preventDefault();setError('');setLoading(true);try{await login(companyKey,username,password);navigate('/');}catch(err){const detail=err?.response?.data?.error;if(detail)setError(String(detail));else if(err?.request)setError('Unable to connect to Procuraflo. Please try again.');else setError(err?.message||'Sign in could not be completed.');}finally{setLoading(false);}}
   async function handleRegistration(event){event.preventDefault();setError('');setMessage('');if(!registrationOpen){setMode('login');setError('Company registration is closed for this installation.');return;}if(registration.password!==registration.confirm_password){setError('Passwords do not match');return;}setLoading(true);try{const payload={...registration};delete payload.confirm_password;const {data}=await client.post('/auth/register-company',payload,{skipAuth:true,skipTenant:true});setCompanyKey(data.company_key);setUsername(registration.username);setPassword('');setRegistration(registrationInitial);setRegistrationOpen(false);setMode('login');setMessage(`${data.company_name} was registered. Sign in with company ID "${data.company_key}".`);}catch(err){const detail=err?.response?.data?.error||err?.response?.data?.detail;if(detail)setError(String(detail));else if(err?.request)setError('The registration service could not be reached. Check the backend URL and allow this website in the backend CORS_ORIGINS setting.');else setError(err?.message||'Company registration failed');}finally{setLoading(false);}}
   const update=(key,value)=>setRegistration(current=>({...current,[key]:value, ...(key==='company_name'&&!current.company_key?{company_key:value.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}:{})}));
-  return <div className="min-h-screen bg-slate-950 px-4 py-10"><div className="mx-auto flex min-h-[calc(100vh-5rem)] w-full max-w-5xl items-center"><div className="grid w-full overflow-hidden rounded-2xl bg-white shadow-2xl lg:grid-cols-[1fr_1.05fr]">
-    <div className="product-brand-surface flex min-h-80 items-center justify-center border-b border-slate-200 bg-white p-6 sm:p-10 lg:min-h-[620px] lg:border-b-0 lg:border-r">
-      <img
-        src={PRODUCT_BRAND.logo}
-        alt={`${PRODUCT_BRAND.name} logo`}
-        className="block h-auto w-full max-w-[360px] object-contain sm:max-w-[430px] lg:max-w-[460px]"
-        draggable="false"
-      />
-    </div>
-    <div className="p-7 sm:p-9 lg:p-11">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-950">{mode==='login'?'Company Sign In':'Register New Company'}</h1>
-        <p className="mt-1 text-sm text-slate-500">{mode==='login'?'Enter your workspace details to continue.':'Create a protected company workspace and administrator account.'}</p>
+  return <div className="login-shell min-h-screen px-4 py-8 sm:px-6 lg:px-10"><div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl items-center"><div className="login-panel grid w-full overflow-hidden rounded-[2rem] bg-white/90 shadow-2xl ring-1 ring-slate-200/80 backdrop-blur-xl lg:grid-cols-[0.92fr_1.08fr]">
+    <div className="login-visual product-brand-surface relative flex min-h-80 flex-col justify-between overflow-hidden border-b border-slate-200 bg-white p-7 sm:p-10 lg:min-h-[650px] lg:border-b-0 lg:border-r">
+      <div className="relative z-10"><ProductBrand /></div>
+      <div className="relative z-10 my-10 flex flex-1 items-center justify-center">
+        <div className="login-mark-wrap">
+          <img
+            src={PRODUCT_BRAND.logo}
+            alt={`${PRODUCT_BRAND.name} logo`}
+            className="login-mark block h-auto w-full object-contain"
+            draggable="false"
+          />
+        </div>
       </div>
-      <div className={`mb-5 grid ${registrationOpen?'grid-cols-2':'grid-cols-1'} rounded-xl bg-slate-100 p-1`}><button type="button" className={mode==='login'?'btn-primary':'btn-secondary'} onClick={()=>{setMode('login');setError('');}}>Company Sign In</button>{registrationOpen&&<button type="button" className={mode==='register'?'btn-primary':'btn-secondary'} onClick={()=>{setMode('register');setError('');}}>Register New Company</button>}</div>
+      <div className="relative z-10 max-w-sm">
+        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">Controlled procurement</div>
+        <p className="mt-3 text-2xl font-semibold leading-tight text-slate-950">Clear purchasing, warehouse, inventory, and audit workflows in one place.</p>
+      </div>
+    </div>
+    <div className="login-form-panel p-7 sm:p-9 lg:p-12">
+      <div className="mb-7">
+        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-600">{mode==='login'?'Secure workspace':'New workspace'}</div>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{mode==='login'?'Company Sign In':'Register New Company'}</h1>
+        <p className="mt-2 text-sm leading-6 text-slate-500">{mode==='login'?'Enter your workspace details to continue.':'Create a protected company workspace and administrator account.'}</p>
+      </div>
+      <div className={`login-mode-switch mb-5 grid ${registrationOpen?'grid-cols-2':'grid-cols-1'} rounded-full bg-slate-100 p-1`}><button type="button" className={mode==='login'?'btn-primary':'btn-secondary'} onClick={()=>{setMode('login');setError('');}}>Company Sign In</button>{registrationOpen&&<button type="button" className={mode==='register'?'btn-primary':'btn-secondary'} onClick={()=>{setMode('register');setError('');}}>Register New Company</button>}</div>
       {message&&<div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{message}</div>}{error&&<div data-error-message="true" role="alert" className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
       {mode==='login'?<form onSubmit={handleLogin} className="space-y-4"><div><label className="text-sm font-medium text-slate-700">Company Login ID</label><input data-field={"companyKey"} className="input mt-1" value={companyKey} onChange={e=>setCompanyKey(e.target.value.toLowerCase())} placeholder="your-company" autoFocus required/><p className="mt-1 text-xs text-slate-500">Use the company ID created during workspace registration.</p></div><div><label className="text-sm font-medium text-slate-700">Username</label><input data-field={"username"} className="input mt-1" value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" required/></div><div><label className="text-sm font-medium text-slate-700">Password</label><input data-field={"password"} className="input mt-1" type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/></div><button className="btn-primary w-full" disabled={loading}>{loading?'Signing in...':'Sign In'}</button></form>
       :<form onSubmit={handleRegistration} className="grid gap-4 sm:grid-cols-2"><div><label className="text-sm font-medium">Company Name</label><input data-field={"company_name"} className="input mt-1" value={registration.company_name} onChange={e=>update('company_name',e.target.value)} required/></div><div><label className="text-sm font-medium">Company Login ID</label><input data-field={"company_key"} className="input mt-1" value={registration.company_key} onChange={e=>update('company_key',e.target.value.toLowerCase().replace(/[^a-z0-9-]/g,''))} pattern="[a-z0-9][a-z0-9-]{2,47}" required/></div><div><label className="text-sm font-medium">Company Email</label><input data-field={"company_email"} className="input mt-1" type="email" value={registration.company_email} onChange={e=>update('company_email',e.target.value)}/></div><div><label className="text-sm font-medium">Administrator Name</label><input data-field={"admin_name"} className="input mt-1" value={registration.admin_name} onChange={e=>update('admin_name',e.target.value)} required/></div><div><label className="text-sm font-medium">Administrator Email</label><input data-field={"admin_email"} className="input mt-1" type="email" value={registration.admin_email} onChange={e=>update('admin_email',e.target.value)}/></div><div><label className="text-sm font-medium">Administrator Username</label><input data-field={"username"} className="input mt-1" value={registration.username} onChange={e=>update('username',e.target.value)} required/></div><div><label className="text-sm font-medium">Password</label><input data-field={"password"} className="input mt-1" type="password" minLength="10" value={registration.password} onChange={e=>update('password',e.target.value)} required/></div><div><label className="text-sm font-medium">Confirm Password</label><input data-field={"confirm_password"} className="input mt-1" type="password" minLength="10" value={registration.confirm_password} onChange={e=>update('confirm_password',e.target.value)} required/></div><div className="sm:col-span-2"><button className="btn-primary w-full" disabled={loading}>{loading?'Creating isolated workspace...':'Register Company & Administrator'}</button></div></form>}

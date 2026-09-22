@@ -407,6 +407,47 @@ const NAV_GROUPS = [
     ],
   },
 ];
+const GROUP_ICONS = {
+  Overview: "dashboard",
+  "Master Data": "cube",
+  "Administration / Controls": "users",
+  Procurement: "cart",
+  Warehouse: "warehouse",
+  Inventory: "layers",
+  Advanced: "tool",
+  Reports: "chart",
+  Help: "help",
+};
+const ITEM_ICON_RULES = [
+  [/dashboard|activity/i, "dashboard"],
+  [/quick|guide|help|getting/i, "help"],
+  [/item|catalog/i, "cube"],
+  [/supplier|vendor/i, "users"],
+  [/warehouse|location|bin/i, "warehouse"],
+  [/inventory|stock|expiry|dead|valuation|abc|cycle/i, "layers"],
+  [/employee|workforce|calendar|delegated|clearance/i, "users"],
+  [/procurement|purchase|requisition|rfq|order|invoice|schedule/i, "cart"],
+  [/receiving|receipt|grn|issue|return|transfer|adjustment|replenishment/i, "warehouse"],
+  [/report|scorecard/i, "chart"],
+  [/setting|tool|import|reference/i, "tool"],
+];
+const ICON_PATHS = {
+  dashboard: "M4 5.5A1.5 1.5 0 0 1 5.5 4h4A1.5 1.5 0 0 1 11 5.5v4A1.5 1.5 0 0 1 9.5 11h-4A1.5 1.5 0 0 1 4 9.5v-4Zm9 0A1.5 1.5 0 0 1 14.5 4h4A1.5 1.5 0 0 1 20 5.5v2A1.5 1.5 0 0 1 18.5 9h-4A1.5 1.5 0 0 1 13 7.5v-2ZM13 14.5a1.5 1.5 0 0 1 1.5-1.5h4a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5v-4ZM4 16.5A1.5 1.5 0 0 1 5.5 15h4a1.5 1.5 0 0 1 1.5 1.5v2A1.5 1.5 0 0 1 9.5 20h-4A1.5 1.5 0 0 1 4 18.5v-2Z",
+  cube: "M12 3 4.5 7.1v9.8L12 21l7.5-4.1V7.1L12 3Zm0 2.3 4.7 2.6L12 10.5 7.3 7.9 12 5.3Zm-5.5 4.2 4.5 2.5v5.9l-4.5-2.5V9.5Zm6.5 8.4V12l4.5-2.5v5.9L13 17.9Z",
+  users: "M8.5 11a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7-1a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM3.5 19.5c.4-3.3 2.4-5 5-5s4.6 1.7 5 5h-10Zm10.5 0c-.2-1.7-.8-3.1-1.8-4.2.8-.5 1.9-.8 3.3-.8 2.5 0 4.4 1.6 4.8 5H14Z",
+  cart: "M5 5h2l1.2 8.1A2 2 0 0 0 10.2 15h6.7a2 2 0 0 0 1.9-1.4L20 8H8.4M10 20a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
+  warehouse: "M3.5 20V9.3L12 4l8.5 5.3V20h-3v-7h-11v7h-3Zm5-5v5h7v-5h-7Zm-2-4h11v-.6L12 7l-5.5 3.4v.6Z",
+  layers: "M12 3 3.5 7.5 12 12l8.5-4.5L12 3Zm-6.6 8.2L3.5 12.2 12 17l8.5-4.8-1.9-1L12 14.8l-6.6-3.6Zm0 5L3.5 17.2 12 22l8.5-4.8-1.9-1L12 19.8l-6.6-3.6Z",
+  tool: "M14.5 4.5a5 5 0 0 0 5 5l-7.8 7.8a3 3 0 1 1-4.2-4.2l7.8-7.8c-.3-.2-.5-.5-.8-.8ZM7 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z",
+  chart: "M5 19h15v2H3V4h2v15Zm3-2V9h3v8H8Zm5 0V5h3v12h-3Zm5 0v-6h3v6h-3Z",
+  help: "M11 17h2v-2h-2v2Zm1-14a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm0 2a5 5 0 0 1 1.3 9.8V13c0-1 .5-1.5 1.2-2.1.8-.7 1.5-1.4 1.5-2.9 0-2-1.6-3.5-4-3.5-2 0-3.5 1-4.2 2.8l1.8.8c.4-1 1.2-1.6 2.3-1.6 1.2 0 2 .7 2 1.6 0 .8-.4 1.2-1.2 1.8-1 .8-1.7 1.5-1.7 3.1v.3a5 5 0 0 1 1-9.9Z",
+};
+function iconForItem(label) {
+  return ITEM_ICON_RULES.find(([pattern]) => pattern.test(label))?.[1] || "dashboard";
+}
+function NavIcon({ name, item = false }) {
+  return _jsx("span", { className: `nav-icon ${item ? "nav-icon-item" : ""}`, "aria-hidden": "true", children: _jsx("svg", { viewBox: "0 0 24 24", focusable: "false", children: _jsx("path", { d: ICON_PATHS[name] || ICON_PATHS.dashboard }) }) });
+}
 export default function Sidebar() {
   const { company } = useBranding();
   const { user } = useAuth();
@@ -490,7 +531,10 @@ export default function Sidebar() {
                   "aria-expanded": isOpen,
                   className: `sidebar-group-button flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wider transition-colors ${isOpen ? "text-cyan-200" : hasActiveItem ? "text-cyan-100" : "text-slate-400 hover:text-white"}`,
                   children: [
-                    group.label,
+                    _jsxs("span", { className: "flex min-w-0 items-center gap-3", children: [
+                      _jsx(NavIcon, { name: GROUP_ICONS[group.label] || "dashboard" }),
+                      _jsx("span", { className: "truncate", children: group.label })
+                    ] }),
                     _jsx("svg", {
                       className: `h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`,
                       viewBox: "0 0 20 20",
@@ -523,7 +567,10 @@ export default function Sidebar() {
                               end: item.to === "/",
                               className: ({ isActive }) =>
                                 `sidebar-link block rounded-lg px-4 py-2 pl-6 text-sm transition-colors ${(item.to.includes("?") ? `${pathname}${search}` === item.to : isActive && !search) ? "bg-gradient-to-r from-cyan-600 to-emerald-500 text-white font-semibold border-l-4 border-cyan-200 shadow-sm" : "text-slate-300 border-l-4 border-transparent hover:bg-cyan-400/10 hover:border-cyan-400/60 hover:text-white"}`,
-                              children: item.label,
+                              children: _jsxs("span", { className: "flex min-w-0 items-center gap-3", children: [
+                                _jsx(NavIcon, { name: iconForItem(item.label), item: true }),
+                                _jsx("span", { className: "truncate", children: item.label })
+                              ] }),
                             }),
                           ],
                         },

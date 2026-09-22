@@ -3023,3 +3023,968 @@ html.error-guidance-open body {overflow-x:clip;}
 .app-modal-header button {cursor:pointer;touch-action:manipulation;}
 .modal-move-handle:focus-visible {outline:2px solid #0796a5;outline-offset:3px;}
 @media print {.app-modal-panel {transform:none!important;}}
+
+/* Modern ProcuraFlo visual refresh. This layer is presentation-only and keeps workflow logic untouched. */
+:root {
+  --pf-ink: #111827;
+  --pf-muted: #667085;
+  --pf-line: #e6ecf2;
+  --pf-soft: #f6f8fb;
+  --pf-soft-blue: #eef5ff;
+  --pf-blue: #0b5cff;
+  --pf-blue-deep: #063a9b;
+  --pf-green: #18a058;
+  --pf-amber: #d99025;
+  --pf-shadow-soft: 0 18px 50px rgba(16, 24, 40, .08);
+  --pf-shadow-tight: 0 8px 24px rgba(16, 24, 40, .07);
+  --procuraflo-brand-background: #ffffff;
+}
+
+html,
+body {
+  background: #f7f9fc !important;
+  color: var(--pf-ink);
+}
+
+body {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(247, 249, 252, .96)),
+    radial-gradient(circle at 16% 12%, rgba(11, 92, 255, .08), transparent 22rem),
+    radial-gradient(circle at 88% 20%, rgba(24, 160, 88, .07), transparent 20rem) !important;
+  background-size: auto !important;
+}
+
+.app-workspace::before,
+.app-workspace::after {
+  opacity: .26 !important;
+  filter: none !important;
+}
+
+.app-sidebar {
+  width: 17rem !important;
+  background: rgba(255, 255, 255, .88) !important;
+  border-right: 1px solid rgba(230, 236, 242, .95) !important;
+  box-shadow: 10px 0 34px rgba(16, 24, 40, .05) !important;
+  backdrop-filter: blur(18px) saturate(145%);
+}
+
+.app-sidebar,
+.app-sidebar * {
+  color: var(--pf-ink);
+}
+
+.app-sidebar > div:first-child {
+  border-color: var(--pf-line) !important;
+}
+
+.product-brand,
+.product-brand-surface {
+  background: transparent !important;
+  color: var(--pf-ink);
+  box-shadow: none !important;
+}
+
+.product-brand img,
+img.product-brand,
+.product-brand-surface img,
+.report-product-logo,
+#procuraflo-print-footer img {
+  border-radius: 0 !important;
+  clip-path: none !important;
+  mix-blend-mode: normal !important;
+}
+
+.product-wordmark {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app-sidebar .sidebar-group-button {
+  color: #475467 !important;
+  border-radius: 999px !important;
+  padding: .6rem .85rem !important;
+}
+
+.app-sidebar .sidebar-group-button::before {
+  width: .42rem;
+  height: .42rem;
+  margin-right: .55rem;
+  background: #0b5cff !important;
+  box-shadow: none !important;
+}
+
+.app-sidebar .sidebar-link {
+  margin: .12rem 0;
+  border-left: 0 !important;
+  border-radius: 999px !important;
+  color: #344054 !important;
+  padding: .58rem .85rem .58rem 1.2rem !important;
+}
+
+.app-sidebar .sidebar-link:hover {
+  background: #f2f6fb !important;
+  color: var(--pf-ink) !important;
+}
+
+.app-sidebar .sidebar-link[class*="bg-gradient"] {
+  background: #eef5ff !important;
+  color: var(--pf-blue-deep) !important;
+  box-shadow: inset 0 0 0 1px rgba(11, 92, 255, .12) !important;
+}
+
+.app-sidebar .sidebar-link::after {
+  right: .85rem;
+  background: var(--pf-green) !important;
+}
+
+.app-sidebar .text-slate-500,
+.app-sidebar .text-slate-400,
+.app-sidebar .text-slate-300,
+.app-sidebar .text-cyan-100,
+.app-sidebar .text-cyan-200,
+.app-sidebar .text-white {
+  color: inherit !important;
+}
+
+.app-topbar {
+  height: 4.35rem !important;
+  background: rgba(255, 255, 255, .78) !important;
+  border-color: rgba(230, 236, 242, .9) !important;
+  box-shadow: 0 10px 34px rgba(16, 24, 40, .055) !important;
+  backdrop-filter: blur(18px) saturate(145%);
+}
+
+.app-main {
+  width: 100%;
+  max-width: 92rem !important;
+  padding: 1.75rem !important;
+}
+
+.app-main h1,
+.app-main h2,
+.app-modal-panel h2 {
+  color: var(--pf-ink) !important;
+  letter-spacing: 0 !important;
+}
+
+.card,
+.app-modal-panel,
+.app-main .surface,
+.app-main .panel {
+  border: 1px solid rgba(230, 236, 242, .95) !important;
+  border-radius: 1rem !important;
+  background: rgba(255, 255, 255, .88) !important;
+  box-shadow: var(--pf-shadow-tight) !important;
+  backdrop-filter: blur(12px);
+}
+
+.card:hover {
+  border-color: rgba(11, 92, 255, .18) !important;
+  box-shadow: var(--pf-shadow-soft) !important;
+  transform: translateY(-1px);
+}
+
+.btn-primary,
+.pf-action-primary,
+.pf-action-positive {
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, var(--pf-blue), #2f80ed) !important;
+  color: #fff !important;
+  box-shadow: 0 10px 24px rgba(11, 92, 255, .18) !important;
+}
+
+.btn-primary:hover,
+.pf-action-primary:hover,
+.pf-action-positive:hover {
+  background: linear-gradient(135deg, #074fdc, var(--pf-blue)) !important;
+}
+
+.btn-secondary,
+.pf-action-secondary,
+.record-view-button,
+.horizontal-scroll-controls button {
+  border: 1px solid var(--pf-line) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, .88) !important;
+  color: #344054 !important;
+  box-shadow: 0 4px 12px rgba(16, 24, 40, .045) !important;
+}
+
+.btn-secondary:hover,
+.pf-action-secondary:hover,
+.record-view-button:hover,
+.horizontal-scroll-controls button:hover {
+  border-color: rgba(11, 92, 255, .28) !important;
+  background: #f7fbff !important;
+  color: var(--pf-blue-deep) !important;
+}
+
+.pf-action-destructive {
+  border-radius: 999px !important;
+  background: #fff7f7 !important;
+  color: #b42318 !important;
+  border-color: #ffd6d2 !important;
+}
+
+.input,
+.app-main :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]),
+.app-modal-panel :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
+  min-height: 2.7rem;
+  border: 1px solid var(--pf-line) !important;
+  border-radius: .9rem !important;
+  background: rgba(255, 255, 255, .94) !important;
+  color: var(--pf-ink) !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .035) !important;
+}
+
+.input:hover,
+.app-main :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):hover,
+.app-modal-panel :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):hover {
+  border-color: #c9d6e4 !important;
+}
+
+.input:focus,
+.app-main :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):focus,
+.app-modal-panel :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):focus {
+  border-color: rgba(11, 92, 255, .55) !important;
+  box-shadow: 0 0 0 4px rgba(11, 92, 255, .10) !important;
+}
+
+.data-table-scroll {
+  padding: .2rem .75rem .95rem;
+}
+
+.table-base,
+.app-main table:not(.controlled-print-document table),
+.app-modal-panel table:not(.controlled-print-document table) {
+  border-collapse: separate !important;
+  border-spacing: 0 .55rem !important;
+  background: transparent !important;
+}
+
+.table-base thead,
+.app-main table:not(.controlled-print-document table) thead,
+.app-modal-panel table:not(.controlled-print-document table) thead {
+  background: transparent !important;
+}
+
+.table-base th,
+.table th,
+.app-main table:not(.controlled-print-document table) th,
+.app-modal-panel table:not(.controlled-print-document table) th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: .6rem .9rem !important;
+  border: 0 !important;
+  background: rgba(247, 249, 252, .92) !important;
+  color: #667085 !important;
+  font-size: .68rem !important;
+  font-weight: 700 !important;
+  letter-spacing: .08em !important;
+  text-transform: uppercase;
+  backdrop-filter: blur(12px);
+}
+
+.table-base th:first-child,
+.app-main table:not(.controlled-print-document table) th:first-child {
+  border-radius: .75rem 0 0 .75rem;
+}
+
+.table-base th:last-child,
+.app-main table:not(.controlled-print-document table) th:last-child {
+  border-radius: 0 .75rem .75rem 0;
+}
+
+.table-base td,
+.table td,
+.app-main table:not(.controlled-print-document table) td,
+.app-modal-panel table:not(.controlled-print-document table) td {
+  padding: .78rem .9rem !important;
+  border-top: 1px solid var(--pf-line) !important;
+  border-bottom: 1px solid var(--pf-line) !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  background: #ffffff !important;
+  color: #344054 !important;
+  font-size: .78rem !important;
+  line-height: 1.45;
+}
+
+.table-base tbody tr td:first-child,
+.app-main table:not(.controlled-print-document table) tbody tr td:first-child {
+  border-left: 1px solid var(--pf-line) !important;
+  border-radius: .95rem 0 0 .95rem;
+}
+
+.table-base tbody tr td:last-child,
+.app-main table:not(.controlled-print-document table) tbody tr td:last-child {
+  border-right: 1px solid var(--pf-line) !important;
+  border-radius: 0 .95rem .95rem 0;
+}
+
+.table-base tbody tr:nth-child(even),
+.table tbody tr:nth-child(even),
+.app-main table:not(.controlled-print-document table) tbody tr:nth-child(even),
+.app-modal-panel table:not(.controlled-print-document table) tbody tr:nth-child(even) {
+  background: transparent !important;
+}
+
+.table-base tbody tr:hover td,
+.table tbody tr:hover td,
+.app-main table:not(.controlled-print-document table) tbody tr:hover td,
+.app-modal-panel table:not(.controlled-print-document table) tbody tr:hover td {
+  border-color: rgba(11, 92, 255, .2) !important;
+  background: #f8fbff !important;
+}
+
+.table-sort-button {
+  gap: .75rem;
+}
+
+.table-sort-indicator {
+  color: #98a2b3 !important;
+}
+
+.record-view-button {
+  min-height: 2rem;
+  padding: .35rem .75rem;
+  font-size: .75rem;
+  font-weight: 600;
+}
+
+.app-main form:not(.controlled-print-document form),
+.app-modal-panel form,
+.app-main .form-section,
+.app-main .form-section-tinted,
+.app-modal-panel .form-section,
+.app-modal-panel .form-section-tinted {
+  border-color: var(--pf-line) !important;
+  border-radius: 1rem !important;
+  background: rgba(255, 255, 255, .82) !important;
+}
+
+.app-main form::before,
+.app-modal-panel form::before {
+  background: transparent url('/branding/procuraflo-logo-blue.png?v=20260922') .5rem center / auto 1.35rem no-repeat !important;
+  color: var(--pf-ink) !important;
+  content: "ProcuraFlo" !important;
+  height: 2rem !important;
+  padding: .38rem .5rem .35rem 2.35rem !important;
+  border-radius: 999px !important;
+  font-size: .78rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+.app-modal-header,
+.app-modal-footer {
+  border-color: var(--pf-line) !important;
+  background: rgba(255, 255, 255, .88) !important;
+  backdrop-filter: blur(14px);
+}
+
+.app-modal-header::before {
+  height: 0 !important;
+}
+
+.record-detail-grid > div {
+  border-color: var(--pf-line) !important;
+  border-radius: .85rem !important;
+  background: #ffffff !important;
+}
+
+.horizontal-scroll-controls {
+  padding: .35rem 0 .65rem !important;
+}
+
+.horizontal-scroll-content::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar {
+  height: 10px;
+}
+
+.horizontal-scroll-content::-webkit-scrollbar-track,
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: #eef2f6;
+}
+
+.horizontal-scroll-content::-webkit-scrollbar-thumb,
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #b8c4d1;
+  border-color: #eef2f6;
+}
+
+.report-product {
+  width: 9.5rem;
+  height: 2.4rem;
+  background: url('/branding/procuraflo-logo-blue.png?v=20260922') left center / 2.1rem auto no-repeat !important;
+  border-radius: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  padding-left: 2.55rem;
+}
+
+.report-product::after {
+  content: "ProcuraFlo";
+  color: var(--pf-ink);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.report-product span {
+  display: none !important;
+}
+
+.controlled-print-document > header,
+.report-header {
+  background: #ffffff !important;
+  border-color: #d8e1ec !important;
+}
+
+.controlled-print-document::before {
+  background: linear-gradient(90deg, var(--pf-blue), var(--pf-green), var(--pf-amber)) !important;
+}
+
+.controlled-print-document thead tr,
+.controlled-print-document thead :is(th, td),
+.report-table th {
+  background: #f3f6fa !important;
+  color: #344054 !important;
+}
+
+.login-shell {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(11, 92, 255, .16), transparent 22rem),
+    radial-gradient(circle at 88% 82%, rgba(24, 160, 88, .11), transparent 24rem),
+    linear-gradient(145deg, #f8fbff, #eef3f8 58%, #f9fbfd);
+}
+
+.login-shell::before {
+  content: "";
+  position: absolute;
+  inset: 7% 8% auto auto;
+  width: 24rem;
+  height: 24rem;
+  border: 1px solid rgba(11, 92, 255, .12);
+  border-radius: 50%;
+  opacity: .85;
+}
+
+.login-panel {
+  position: relative;
+}
+
+.login-visual::before {
+  content: "";
+  position: absolute;
+  inset: 1.2rem;
+  border: 1px solid rgba(230, 236, 242, .95);
+  border-radius: 1.45rem;
+  pointer-events: none;
+}
+
+.login-visual::after {
+  content: "";
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  top: 18%;
+  height: 18rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(11, 92, 255, .12), transparent 65%);
+  filter: blur(10px);
+}
+
+.login-mark-wrap {
+  width: min(62vw, 22rem);
+  animation: procurafloFloat 7s ease-in-out infinite;
+}
+
+.login-mark {
+  filter: drop-shadow(0 24px 38px rgba(11, 92, 255, .16));
+}
+
+.login-form-panel form::before {
+  content: none !important;
+}
+
+.login-mode-switch .btn-primary,
+.login-mode-switch .btn-secondary {
+  box-shadow: none !important;
+}
+
+.login-mode-switch .btn-secondary {
+  border-color: transparent !important;
+  background: transparent !important;
+}
+
+@keyframes procurafloFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-mark-wrap {
+    animation: none;
+  }
+}
+
+@media print {
+  body,
+  .app-main,
+  .controlled-print-document,
+  .executive-report {
+    background: #ffffff !important;
+    background-image: none !important;
+  }
+
+  .controlled-print-document,
+  .executive-report,
+  .card {
+    box-shadow: none !important;
+  }
+}
+
+/* Reference-style refinement: clean SaaS shell, blue pills, soft panels. */
+body {
+  background:
+    linear-gradient(180deg, #f8fbff 0%, #f4f8fd 44%, #f7fbff 100%) !important;
+}
+
+.app-workspace {
+  background: linear-gradient(90deg, rgba(235, 244, 255, .85), rgba(248, 251, 255, .92)) !important;
+}
+
+.app-sidebar {
+  width: 16.25rem !important;
+  padding: 0 .75rem;
+  background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(245,250,255,.92)) !important;
+}
+
+.app-sidebar > div:first-child {
+  padding: 1.25rem .5rem !important;
+}
+
+.app-sidebar .product-brand {
+  width: 100%;
+  justify-content: flex-start;
+  padding-left: .25rem !important;
+}
+
+.app-sidebar .product-brand img {
+  height: 2.15rem !important;
+  width: 2.15rem !important;
+}
+
+.app-sidebar .product-wordmark span:first-child {
+  font-size: 1.45rem !important;
+  color: #07173d !important;
+}
+
+.app-sidebar nav {
+  padding-top: .75rem !important;
+}
+
+.app-sidebar .sidebar-group-button {
+  margin: 1rem 0 .45rem;
+  color: #7282a1 !important;
+  font-size: .69rem !important;
+  letter-spacing: .08em !important;
+}
+
+.app-sidebar .sidebar-group-button::before {
+  content: none !important;
+}
+
+.nav-icon {
+  display: inline-flex;
+  width: 1.65rem;
+  height: 1.65rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: .55rem;
+  border: 1px solid rgba(37, 99, 235, .12);
+  background: rgba(239, 246, 255, .82);
+  color: #2657b8;
+  font-size: .72rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.nav-icon svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: currentColor;
+}
+
+.nav-icon-item {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  background: transparent;
+  color: #36527c;
+  font-size: .74rem;
+}
+
+.nav-icon-item svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.app-sidebar .sidebar-link {
+  margin: .12rem 0 !important;
+  padding: .62rem .8rem !important;
+  border-radius: .78rem !important;
+  font-weight: 600;
+}
+
+.app-sidebar .sidebar-link[class*="bg-gradient"] {
+  background: #eaf2ff !important;
+  color: #075beb !important;
+  box-shadow: inset 4px 0 0 #2f6df6, 0 8px 20px rgba(47, 109, 246, .08) !important;
+}
+
+.app-sidebar .sidebar-link[class*="bg-gradient"] .nav-icon-item {
+  background: #2f6df6;
+  color: #fff;
+}
+
+.app-sidebar > div:last-child {
+  margin: auto .25rem 1rem;
+  border: 0 !important;
+  border-radius: 1rem;
+  background: #eef5ff !important;
+  padding: .9rem !important;
+}
+
+.app-topbar {
+  height: 4.25rem !important;
+  padding-inline: 1.55rem !important;
+  background: rgba(255,255,255,.86) !important;
+}
+
+.topbar-breadcrumb {
+  min-width: 14rem;
+}
+
+.topbar-search {
+  height: 2.85rem;
+  border-color: #d7e3f5 !important;
+  box-shadow: 0 10px 24px rgba(15, 40, 90, .055) !important;
+}
+
+.topbar-search-icon {
+  position: relative;
+  display: inline-block;
+  width: .92rem;
+  height: .92rem;
+  border: 2px solid #2f6df6;
+  border-radius: 999px;
+}
+
+.topbar-search-icon::after {
+  content: "";
+  position: absolute;
+  right: -.34rem;
+  bottom: -.22rem;
+  width: .45rem;
+  height: 2px;
+  border-radius: 999px;
+  background: #2f6df6;
+  transform: rotate(45deg);
+}
+
+.topbar-alert {
+  font-weight: 900;
+}
+
+.app-main {
+  max-width: none !important;
+  padding: 1.65rem 1.9rem 2.5rem !important;
+}
+
+.app-main > .horizontal-scroll-region > .horizontal-scroll-content > div > div:first-child:not(.login-panel) {
+  margin-bottom: 1.25rem !important;
+  padding: 1.5rem 1.75rem !important;
+  border: 1px solid #dfe8f6;
+  border-radius: 1.25rem;
+  background: rgba(255,255,255,.9);
+  box-shadow: 0 12px 34px rgba(15, 40, 90, .055);
+}
+
+.app-main > .horizontal-scroll-region > .horizontal-scroll-content > div > div:first-child h1 {
+  font-size: clamp(1.75rem, 2.3vw, 2.45rem) !important;
+  line-height: 1.1 !important;
+  color: #07173d !important;
+}
+
+.app-main > .horizontal-scroll-region > .horizontal-scroll-content > div > div:first-child p {
+  max-width: 58rem;
+  color: #61739b !important;
+  font-size: 1rem !important;
+  line-height: 1.55 !important;
+}
+
+.app-main > .horizontal-scroll-region > .horizontal-scroll-content > div > div:first-child .btn-primary {
+  min-height: 3.15rem;
+  padding-inline: 1.7rem !important;
+  border-radius: 1rem !important;
+  font-size: 1rem !important;
+}
+
+.executive-summary-header {
+  margin-bottom: 1.15rem !important;
+  padding: .25rem 0 1rem !important;
+  border-bottom: 0 !important;
+}
+
+.executive-summary-header > div:first-child > div:first-child {
+  height: 4.25rem !important;
+  width: 4.25rem !important;
+  border-radius: .95rem !important;
+  box-shadow: 0 14px 24px rgba(47, 109, 246, .2);
+}
+
+.executive-summary-header h1 {
+  font-size: 1.75rem !important;
+  line-height: 2rem !important;
+}
+
+.executive-summary-header select,
+.executive-summary-header .input {
+  height: 3rem !important;
+  min-width: 13.75rem;
+  border-radius: .9rem !important;
+  padding-inline: 1rem !important;
+  font-size: .9rem !important;
+  font-weight: 600;
+}
+
+.executive-summary-header button {
+  height: 3rem;
+  border-radius: .9rem !important;
+  padding-inline: 1.3rem !important;
+}
+
+.executive-kpi-grid {
+  gap: 1rem !important;
+}
+
+.executive-kpi-grid .card,
+.role-dashboard-summary .executive-kpi-grid .card,
+#executive-dashboard-summary .executive-kpi-grid .card {
+  min-height: 7.1rem !important;
+  border-radius: 1rem !important;
+  background: #fff !important;
+  box-shadow: 0 12px 32px rgba(15, 40, 90, .07) !important;
+}
+
+.executive-kpi-grid .card > div:first-child {
+  height: 4px !important;
+  border-radius: 999px 999px 0 0;
+}
+
+.executive-kpi-grid .card > div:nth-child(3),
+.stock-risk-card > div:nth-child(2) {
+  color: #30476e !important;
+  font-size: .78rem !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.executive-kpi-grid .card:not(.stock-risk-card) > div:nth-child(4),
+.stock-risk-card strong {
+  color: #07173d !important;
+  font-size: 1.45rem !important;
+}
+
+.stock-risk-card > div:last-child {
+  margin-top: .6rem !important;
+  color: #075beb !important;
+  font-size: .72rem !important;
+  line-height: 1rem !important;
+  font-weight: 800 !important;
+}
+
+#executive-dashboard-summary section[aria-label="Secondary management indicators"] {
+  margin-top: 1rem !important;
+  border-radius: 1rem !important;
+  border-color: #dfe8f6 !important;
+  box-shadow: 0 12px 32px rgba(15, 40, 90, .06);
+}
+
+#executive-dashboard-summary section[aria-label="Secondary management indicators"] button {
+  padding: 1.05rem 1.2rem !important;
+}
+
+#executive-dashboard-summary .card,
+.role-dashboard-summary .card {
+  border-color: #dfe8f6 !important;
+  border-radius: 1rem !important;
+}
+
+#executive-dashboard-summary .card h2,
+.role-dashboard-summary .card h2,
+#executive-dashboard-summary .card h3,
+.role-dashboard-summary .card h3 {
+  color: #07173d !important;
+}
+
+#executive-dashboard-summary .card p,
+.role-dashboard-summary .card p {
+  color: #61739b !important;
+}
+
+.data-table-toolbar {
+  margin: 1rem 1rem 0;
+  padding: .9rem !important;
+  border: 1px solid #dfe8f6 !important;
+  border-radius: 1rem;
+  background: rgba(255,255,255,.92);
+}
+
+.data-table-search .input {
+  height: 3.25rem;
+  border-radius: 1rem !important;
+  font-size: .98rem;
+  padding-left: 3.25rem !important;
+}
+
+.data-table-search-icon {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid #2f6df6;
+  border-radius: 999px;
+}
+
+.data-table-search-icon::after {
+  content: "";
+  position: absolute;
+  right: -.35rem;
+  bottom: -.2rem;
+  width: .48rem;
+  height: 2px;
+  border-radius: 999px;
+  background: #2f6df6;
+  transform: rotate(45deg);
+}
+
+.data-table-count {
+  min-height: 3.25rem;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 1rem !important;
+  padding-inline: 1.25rem !important;
+  color: #61739b !important;
+}
+
+.horizontal-scroll-controls {
+  justify-content: flex-end !important;
+  padding: 1rem 1rem .65rem !important;
+}
+
+.horizontal-scroll-controls button {
+  height: 3rem;
+  min-width: 9.5rem;
+  border-radius: 1rem !important;
+  font-size: .95rem !important;
+  font-weight: 800 !important;
+}
+
+.data-table-scroll {
+  padding: .2rem 1rem 1.2rem !important;
+}
+
+.table-base {
+  border-spacing: 0 !important;
+  overflow: hidden;
+}
+
+.data-table-scroll > table,
+.app-main .card > .horizontal-scroll-region table.table-base {
+  border: 1px solid #dfe8f6;
+  border-radius: 1rem;
+}
+
+.table-base th,
+.app-main table:not(.controlled-print-document table) th {
+  height: 4.25rem;
+  background: #f6f9fe !important;
+  color: #07173d !important;
+  font-size: .9rem !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.table-base th:first-child,
+.app-main table:not(.controlled-print-document table) th:first-child {
+  border-radius: 1rem 0 0 0 !important;
+}
+
+.table-base th:last-child,
+.app-main table:not(.controlled-print-document table) th:last-child {
+  border-radius: 0 1rem 0 0 !important;
+}
+
+.table-base td,
+.app-main table:not(.controlled-print-document table) td,
+.app-modal-panel table:not(.controlled-print-document table) td {
+  border-radius: 0 !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  border-top: 1px solid #edf2f8 !important;
+  border-bottom: 0 !important;
+  padding-block: 1rem !important;
+}
+
+.table-base tbody tr td:first-child,
+.app-main table:not(.controlled-print-document table) tbody tr td:first-child,
+.table-base tbody tr td:last-child,
+.app-main table:not(.controlled-print-document table) tbody tr td:last-child {
+  border-radius: 0 !important;
+}
+
+.data-table-empty {
+  height: 23rem;
+  background: #fff !important;
+}
+
+.data-table-empty > div:first-child {
+  box-shadow: 0 18px 35px rgba(47, 109, 246, .12);
+}
+
+.record-view-button {
+  color: #075beb !important;
+  background: #eef5ff !important;
+  border-color: #d7e6ff !important;
+}
+
+.status-badge,
+.app-main span[class*="bg-emerald-100"],
+.app-main span[class*="bg-amber-100"],
+.app-main span[class*="bg-rose-100"],
+.app-main span[class*="bg-blue-100"],
+.app-modal-panel span[class*="bg-emerald-100"],
+.app-modal-panel span[class*="bg-amber-100"],
+.app-modal-panel span[class*="bg-rose-100"],
+.app-modal-panel span[class*="bg-blue-100"] {
+  border-radius: 999px !important;
+  padding: .35rem .7rem !important;
+}
+
+@media (max-width: 1023px) {
+  .app-sidebar {
+    width: 14.5rem !important;
+  }
+
+  .app-main {
+    padding-inline: 1rem !important;
+  }
+
+  .app-main > .horizontal-scroll-region > .horizontal-scroll-content > div > div:first-child:not(.login-panel) {
+    padding: 1.1rem !important;
+  }
+}
