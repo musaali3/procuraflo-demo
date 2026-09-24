@@ -6,6 +6,7 @@ import { ROLE_LABELS } from '../types';
 import Modal from './Modal';
 import client from '../api/client';
 import { useBranding } from '../contexts/BrandingContext';
+import { ProductBrand } from './Branding';
 
 const LABELS = {
     masters: 'Master Data',
@@ -25,19 +26,20 @@ function titleCase(value) {
 }
 
 export default function Topbar() {
-    const { company, product } = useBranding();
+    const { company } = useBranding();
     const { user, logout } = useAuth();
     const location = useLocation();
     const [showPassword, setShowPassword] = useState(false);
+    const [showNotifications, setShowNotifications] = useState(false);
     const [passwords, setPasswords] = useState({ current_password: '', new_password: '' });
     const [error, setError] = useState('Enter your current password, then choose a different new password with at least 8 characters. Use a private passphrase that is difficult to guess. You will be signed out after the change and must log in with the new password.');
     const crumbs = useMemo(() => {
-        if (location.pathname === '/') return [company.company_name || 'Workspace', product.name];
+        if (location.pathname === '/') return [company.company_name || 'Workspace', 'Dashboard'];
         const parts = location.pathname.split('/').filter(Boolean);
         const first = LABELS[parts[0]] || titleCase(parts[0]);
         const current = titleCase(parts[parts.length - 1]);
         return [first, current];
-    }, [company.company_name, location.pathname, product.name]);
+    }, [company.company_name, location.pathname]);
     async function changePassword() {
         if (!passwords.current_password) {
             setError('Enter your current password before choosing a new password.');
@@ -61,10 +63,13 @@ export default function Topbar() {
         }
     }
     return (_jsxs("header", { className: "app-topbar sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white px-6", children: [
+        _jsxs("div", { className: "topbar-left flex min-w-0 items-center gap-5", children: [
+        _jsx("div", { className: "topbar-product-logo shrink-0", children: _jsx(ProductBrand, { compact: true, inverse: true }) }),
         _jsxs("nav", { className: "topbar-breadcrumb flex min-w-0 items-center gap-2 text-sm", "aria-label": "Breadcrumb", children: [
             _jsx("span", { className: "truncate font-semibold text-slate-600", children: crumbs[0] }),
             _jsx("span", { className: "text-slate-300", children: ">" }),
             _jsx("span", { className: "truncate font-semibold text-blue-600", children: crumbs[1] })
+        ] })
         ] }),
         _jsxs("div", { className: "topbar-search hidden min-w-[18rem] max-w-xl flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm lg:flex", children: [
             _jsx("span", { className: "topbar-search-icon", "aria-hidden": "true" }),
@@ -72,9 +77,16 @@ export default function Topbar() {
         ] }),
         _jsxs("div", { className: "flex shrink-0 items-center gap-4", children: [
             (user?.must_change_password || (user?.password_days_remaining != null && user.password_days_remaining <= 7)) && _jsx("button", { className: "rounded-full bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700", onClick: () => setShowPassword(true), children: user.must_change_password ? 'Change default password' : `Password expires in ${user.password_days_remaining} days` }),
-            _jsxs("button", { type: "button", className: "topbar-alert relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-blue-700 shadow-sm", "aria-label": "Notifications", children: [
-                _jsx("span", { "aria-hidden": "true", children: "!" }),
-                _jsx("span", { className: "absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-600" })
+            _jsxs("div", { className: "topbar-notification-wrap relative", children: [
+                _jsxs("button", { type: "button", className: "topbar-alert relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-blue-700 shadow-sm", "aria-label": "Notifications", "aria-expanded": showNotifications, onClick: () => setShowNotifications((value) => !value), children: [
+                    _jsx("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false", children: _jsx("path", { d: "M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6h-1.4V10a5.6 5.6 0 0 0-4.1-5.4V3a1.5 1.5 0 0 0-3 0v1.6A5.6 5.6 0 0 0 6.4 10v6H5a1 1 0 0 0 0 2h14a1 1 0 0 0 0-2Zm-3.4 0H8.4V10a3.6 3.6 0 1 1 7.2 0v6Z" }) }),
+                    _jsx("span", { className: "absolute right-2 top-2 h-2 w-2 rounded-full bg-blue-600" })
+                ] }),
+                showNotifications && _jsxs("div", { className: "topbar-notification-panel", role: "status", children: [
+                    _jsx("div", { className: "text-sm font-semibold", children: "Notifications" }),
+                    _jsx("div", { className: "mt-1 text-xs", children: "No new system alerts right now." }),
+                    (user?.password_days_remaining != null && user.password_days_remaining <= 7) && _jsx("button", { type: "button", className: "mt-3 text-xs font-semibold", onClick: () => { setShowNotifications(false); setShowPassword(true); }, children: "Review password status" })
+                ] })
             ] }),
             _jsxs("div", { className: "hidden text-right sm:block", children: [
                 _jsx("div", { className: "text-sm font-semibold text-slate-950", children: user?.full_name }),

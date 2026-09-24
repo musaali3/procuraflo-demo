@@ -11,23 +11,14 @@ export function resolveCompanyAssetUrl(source) {
 }
 
 export function ProductBrand({ compact = false, inverse = false }) {
-  return _jsxs("div", {
-    className: `product-brand flex min-w-0 items-center gap-2 rounded-lg ${compact ? 'px-1.5 py-1' : 'px-2 py-1.5'}`,
-    children: [
-      _jsx("img", {
-        src: PRODUCT_BRAND.logo,
-        alt: `${PRODUCT_BRAND.name} logo`,
-        className: `${compact ? 'h-8 w-8' : 'h-12 w-12'} shrink-0 object-contain`,
-        draggable: "false",
-      }),
-      _jsxs("span", {
-        className: "product-wordmark min-w-0 leading-none",
-        children: [
-          _jsx("span", { className: `block font-semibold tracking-tight ${compact ? 'text-base' : 'text-2xl'} ${inverse ? 'text-white' : 'text-slate-950'}`, children: PRODUCT_BRAND.name }),
-          !compact && _jsx("span", { className: `mt-1 block text-[11px] font-medium uppercase tracking-[0.18em] ${inverse ? 'text-slate-300' : 'text-slate-500'}`, children: PRODUCT_BRAND.tagline })
-        ]
-      })
-    ]
+  return _jsx("div", {
+    className: `product-brand flex min-w-0 items-center rounded-lg ${compact ? 'px-1.5 py-1' : 'px-2 py-1.5'}`,
+    children: _jsx("img", {
+      src: PRODUCT_BRAND.logo,
+      alt: `${PRODUCT_BRAND.name} logo`,
+      className: `${compact ? 'h-10 w-44' : 'h-20 w-80'} max-w-full shrink-0 object-contain object-left`,
+      draggable: "false",
+    })
   });
 }
 

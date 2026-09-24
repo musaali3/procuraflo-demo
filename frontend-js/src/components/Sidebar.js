@@ -1,4 +1,3 @@
-import { ProductBrand } from './Branding';
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import React, { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
@@ -439,6 +438,7 @@ const ICON_PATHS = {
   warehouse: "M3.5 20V9.3L12 4l8.5 5.3V20h-3v-7h-11v7h-3Zm5-5v5h7v-5h-7Zm-2-4h11v-.6L12 7l-5.5 3.4v.6Z",
   layers: "M12 3 3.5 7.5 12 12l8.5-4.5L12 3Zm-6.6 8.2L3.5 12.2 12 17l8.5-4.8-1.9-1L12 14.8l-6.6-3.6Zm0 5L3.5 17.2 12 22l8.5-4.8-1.9-1L12 19.8l-6.6-3.6Z",
   tool: "M14.5 4.5a5 5 0 0 0 5 5l-7.8 7.8a3 3 0 1 1-4.2-4.2l7.8-7.8c-.3-.2-.5-.5-.8-.8ZM7 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z",
+  pin: "M8 4h8l-1 5 3 3v2h-5v6l-1 1-1-1v-6H6v-2l3-3-1-5Z",
   chart: "M5 19h15v2H3V4h2v15Zm3-2V9h3v8H8Zm5 0V5h3v12h-3Zm5 0v-6h3v6h-3Z",
   help: "M11 17h2v-2h-2v2Zm1-14a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm0 2a5 5 0 0 1 1.3 9.8V13c0-1 .5-1.5 1.2-2.1.8-.7 1.5-1.4 1.5-2.9 0-2-1.6-3.5-4-3.5-2 0-3.5 1-4.2 2.8l1.8.8c.4-1 1.2-1.6 2.3-1.6 1.2 0 2 .7 2 1.6 0 .8-.4 1.2-1.2 1.8-1 .8-1.7 1.5-1.7 3.1v.3a5 5 0 0 1 1-9.9Z",
 };
@@ -452,6 +452,7 @@ export default function Sidebar() {
   const { company } = useBranding();
   const { user } = useAuth();
   const { pathname, search } = useLocation();
+  const [pinned, setPinned] = useState(false);
   const visibleGroups = user?.role ? (ROLE_VISIBILITY[user.role] || []) : [];
   const warehouseLogin = ["WarehouseManager", "WarehouseSupervisor", "Storekeeper"].includes(user?.role);
   const canSee = (to) => {
@@ -495,14 +496,21 @@ export default function Sidebar() {
   }
   return _jsxs("aside", {
     className:
-      "app-sidebar w-64 min-h-screen self-stretch bg-slate-950 text-slate-300 flex flex-col flex-shrink-0",
+      `app-sidebar ${pinned ? "sidebar-pinned" : ""} w-64 min-h-screen self-stretch bg-slate-950 text-slate-300 flex flex-col flex-shrink-0`,
     children: [
       _jsx("div", {
-        className: "px-5 py-5 border-b border-white/10",
-        children: _jsx("div", {
-          className:
-            "px-4 py-3 text-center text-lg font-bold text-white",
-          children: _jsx(ProductBrand, { compact: true, inverse: true }),
+        className: "sidebar-pin-row border-b border-white/10 px-2 py-3",
+        children: _jsxs("button", {
+          type: "button",
+          className: "sidebar-pin-button",
+          onClick: () => setPinned((value) => !value),
+          "aria-pressed": pinned,
+          "aria-label": pinned ? "Collapse navigation" : "Keep navigation open",
+          title: pinned ? "Collapse navigation" : "Keep navigation open",
+          children: [
+            _jsx(NavIcon, { name: "pin" }),
+            _jsx("span", { className: "sidebar-text truncate", children: pinned ? "Pinned open" : "Keep open" }),
+          ],
         }),
       }),
       _jsx("nav", {
