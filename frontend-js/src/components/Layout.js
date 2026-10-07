@@ -36,7 +36,7 @@ export default function Layout({ children }) {
       _jsx(ButtonThemeEnhancer, {}),
       _jsx(Sidebar, {}),
       _jsxs("div", {
-        className: "relative z-[1] flex-1 min-w-0",
+        className: "relative flex-1 min-w-0",
         children: [
           _jsx(Topbar, {}),
           delegations.length>0&&_jsxs("div",{className:"border-b border-blue-200 bg-blue-50 px-5 py-2 text-sm text-blue-950",children:[_jsx("strong",{children:"Temporary Delegated Authority Active: "}),delegations.map((row,index)=>_jsxs("span",{children:[index?" · ":"",row.authority_label," — ",row.scope_type.replaceAll('_',' ')," — valid until ",new Date(row.effective_until).toLocaleString()]},row.id))]}),

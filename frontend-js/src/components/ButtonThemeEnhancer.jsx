@@ -6,7 +6,7 @@ const SECONDARY = /\b(view|cancel|close|back|clear|audit|history|preview)\b/i;
 const PRIMARY = /\b(save|submit|create|add|new|edit|print|download|export|upload|issue|generate|update|sign in|change password)\b/i;
 
 function applyRole(button) {
-  if (!(button instanceof HTMLButtonElement) || button.closest('.app-sidebar')) return;
+  if (!(button instanceof HTMLButtonElement) || button.closest('.app-sidebar') || button.closest('.topbar-account-menu') || button.closest('.topbar-search')) return;
   const label = `${button.getAttribute('aria-label') || ''} ${button.textContent || ''}`.replace(/\s+/g, ' ').trim();
   if (!label) return;
   button.classList.remove('pf-action-primary', 'pf-action-secondary', 'pf-action-positive', 'pf-action-destructive');

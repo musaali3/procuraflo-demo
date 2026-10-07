@@ -14,7 +14,7 @@ export function ProductBrand({ compact = false, inverse = false }) {
   return _jsx("div", {
     className: `product-brand flex min-w-0 items-center rounded-lg ${compact ? 'px-1.5 py-1' : 'px-2 py-1.5'}`,
     children: _jsx("img", {
-      src: PRODUCT_BRAND.logo,
+      src: compact && PRODUCT_BRAND.topbarLogo ? PRODUCT_BRAND.topbarLogo : PRODUCT_BRAND.logo,
       alt: `${PRODUCT_BRAND.name} logo`,
       className: `${compact ? 'h-10 w-44' : 'h-20 w-80'} max-w-full shrink-0 object-contain object-left`,
       draggable: "false",
