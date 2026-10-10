@@ -452,7 +452,6 @@ export default function Sidebar() {
   const { company } = useBranding();
   const { user } = useAuth();
   const { pathname, search } = useLocation();
-  const [pinned, setPinned] = useState(false);
   const visibleGroups = user?.role ? (ROLE_VISIBILITY[user.role] || []) : [];
   const warehouseLogin = ["WarehouseManager", "WarehouseSupervisor", "Storekeeper"].includes(user?.role);
   const canSee = (to) => {
@@ -496,23 +495,8 @@ export default function Sidebar() {
   }
   return _jsxs("aside", {
     className:
-      `app-sidebar ${pinned ? "sidebar-pinned" : ""} w-64 min-h-screen self-stretch bg-slate-950 text-slate-300 flex flex-col flex-shrink-0`,
+      "app-sidebar w-64 min-h-screen self-stretch bg-slate-950 text-slate-300 flex flex-col flex-shrink-0",
     children: [
-      _jsx("div", {
-        className: "sidebar-pin-row border-b border-white/10 px-2 py-3",
-        children: _jsxs("button", {
-          type: "button",
-          className: "sidebar-pin-button",
-          onClick: () => setPinned((value) => !value),
-          "aria-pressed": pinned,
-          "aria-label": pinned ? "Collapse navigation" : "Keep navigation open",
-          title: pinned ? "Collapse navigation" : "Keep navigation open",
-          children: [
-            _jsx(NavIcon, { name: "pin" }),
-            _jsx("span", { className: "sidebar-text truncate", children: pinned ? "Pinned open" : "Keep open" }),
-          ],
-        }),
-      }),
       _jsx("nav", {
         className: "py-3 flex-1",
         children: NAV_GROUPS.filter(
@@ -576,7 +560,6 @@ export default function Sidebar() {
                               className: ({ isActive }) =>
                                 `sidebar-link block rounded-lg px-4 py-2 pl-6 text-sm transition-colors ${(item.to.includes("?") ? `${pathname}${search}` === item.to : isActive && !search) ? "bg-gradient-to-r from-cyan-600 to-emerald-500 text-white font-semibold border-l-4 border-cyan-200 shadow-sm" : "text-slate-300 border-l-4 border-transparent hover:bg-cyan-400/10 hover:border-cyan-400/60 hover:text-white"}`,
                               children: _jsxs("span", { className: "flex min-w-0 items-center gap-3", children: [
-                                _jsx(NavIcon, { name: iconForItem(item.label), item: true }),
                                 _jsx("span", { className: "truncate", children: item.label })
                               ] }),
                             }),

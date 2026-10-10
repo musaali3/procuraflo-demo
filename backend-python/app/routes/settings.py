@@ -20,7 +20,7 @@ def company(_u:User):return fetch_one('SELECT * FROM company WHERE deleted_at IS
 @router.get('/branding')
 def branding():
     row=fetch_one('SELECT name,logo_url,address,phone,email,website,tax_info,registration_number,branch_info,currency,base_currency,country_code,time_zone,financial_year FROM company WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 1')or{}
-    return {'company_name':row.get('name')or'Company Name','logo_url':row.get('logo_url'),'address':row.get('address')or'','phone':row.get('phone')or'','email':row.get('email')or'','website':row.get('website')or'','tax_info':row.get('tax_info')or'','registration_number':row.get('registration_number')or'','branch_info':row.get('branch_info')or'','currency':row.get('base_currency')or row.get('currency')or'SAR','base_currency':row.get('base_currency')or row.get('currency')or'SAR','country_code':row.get('country_code')or'SA','time_zone':row.get('time_zone')or'Asia/Riyadh','financial_year':row.get('financial_year')or'','application_name':'Procuraflo','product_brand':{'name':'Procuraflo','logo_url':'/branding/procuraflo-logo.png?v=20260906','icon_url':'/branding/procuraflo-icon.svg?v=20260906','background':'#202543'}}
+    return {'company_name':row.get('name')or'Company Name','logo_url':row.get('logo_url'),'address':row.get('address')or'','phone':row.get('phone')or'','email':row.get('email')or'','website':row.get('website')or'','tax_info':row.get('tax_info')or'','registration_number':row.get('registration_number')or'','branch_info':row.get('branch_info')or'','currency':row.get('base_currency')or row.get('currency')or'SAR','base_currency':row.get('base_currency')or row.get('currency')or'SAR','country_code':row.get('country_code')or'SA','time_zone':row.get('time_zone')or'Asia/Riyadh','financial_year':row.get('financial_year')or'','application_name':'Procuraflo','product_brand':{'name':'Procuraflo','logo_url':'/branding/procuraflo-logo-linkedin.png?v=20260924','topbar_logo_url':'/branding/procuraflo-topbar-logo.png?v=20261006','background':'#22243F'}}
 @router.put('/company')
 def update_company(body:dict,user:dict=Depends(admin)):
     body=dict(body)
@@ -135,7 +135,7 @@ def download_import_template(template_type:str,user:dict=Depends(admin)):
     sheet.row_dimensions[1].height=28;sheet.row_dimensions[2].height=22;sheet.row_dimensions[3].height=30
     for index,header in enumerate(template[0],1):sheet.column_dimensions[sheet.cell(3,index).column_letter].width=min(34,max(12,len(header)+3))
     from openpyxl.drawing.image import Image as SpreadsheetImage
-    brand_image=SpreadsheetImage(str(Path(__file__).resolve().parents[1]/'assets'/'procuraflo-logo.png'))
+    brand_image=SpreadsheetImage(str(Path(__file__).resolve().parents[1]/'assets'/'procuraflo-topbar-logo.png'))
     brand_image.width=144;brand_image.height=48
     sheet.add_image(brand_image,'A1');sheet.row_dimensions[1].height=58
     sheet['A1'].alignment=Alignment(vertical='bottom',horizontal='left')

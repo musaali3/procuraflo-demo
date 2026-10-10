@@ -10,7 +10,9 @@ def test_registered_product_brand_preserves_company_identity(monkeypatch):
     result = settings.branding()
     assert result['application_name'] == 'Procuraflo'
     assert result['product_brand']['name'] == 'Procuraflo'
-    assert 'procuraflo-logo.png' in result['product_brand']['logo_url']
+    assert 'procuraflo-logo-linkedin.png' in result['product_brand']['logo_url']
+    assert 'procuraflo-topbar-logo.png' in result['product_brand']['topbar_logo_url']
+    assert 'icon_url' not in result['product_brand']
     assert result['company_name'] == 'Independent Company'
     assert result['logo_url'] == '/uploads/logos/company.png'
 
@@ -24,7 +26,7 @@ def test_import_workbook_embeds_logo_and_preserves_import_columns():
     with zipfile.ZipFile(io.BytesIO(content)) as book:
         media = [name for name in book.namelist() if name.startswith('xl/media/')]
         assert len(media) == 1
-        source = Path(__file__).resolve().parents[2] / 'frontend-js/public/branding/procuraflo-logo.png'
+        source = Path(__file__).resolve().parents[2] / 'frontend-js/public/branding/procuraflo-topbar-logo.png'
         assert book.read(media[0]) == source.read_bytes()
         assert b'Procuraflo' in book.read('docProps/core.xml')
         assert b'roundRect' in book.read('xl/drawings/drawing1.xml')

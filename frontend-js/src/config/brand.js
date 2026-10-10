@@ -6,5 +6,4 @@ export const PRODUCT_BRAND = Object.freeze({
     description: 'Supply Chain Control System',
     logo: '/branding/procuraflo-logo-linkedin.png?v=20260924',
     topbarLogo: '/branding/procuraflo-topbar-logo.png?v=20261006',
-    icon: '/branding/procuraflo-icon.svg?v=20260906',
 });

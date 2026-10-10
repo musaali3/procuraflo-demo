@@ -20,7 +20,7 @@ export function makePdf() {
 const compiled={exports:{}};
 new Function('require','module','exports',result.outputFiles[0].text)(createRequire(import.meta.url),compiled,compiled.exports);
 const {BRAND_LOGO_DATA,DOCUMENT_THEME,brandedSpreadsheetHtml,makePdf}=compiled.exports;
-const original=await readFile('public/branding/procuraflo-logo.png');
+const original=await readFile('public/branding/procuraflo-topbar-logo.png');
 assert.deepEqual(Buffer.from(BRAND_LOGO_DATA.split(',')[1],'base64'),original);
 assert.equal(DOCUMENT_THEME.logo,BRAND_LOGO_DATA);
 const pdf=makePdf();
@@ -31,12 +31,12 @@ for(let n=1;n<=3;n++)assert.ok(pdf.includes('Page '+n+' of 3'));
 assert.equal((pdf.match(/\/I0 Do/g)||[]).length,3);
 const html=brandedSpreadsheetHtml({companyName:'A & B',title:'Report',tableHtml:'<table><tr><td>42</td></tr></table>'});
 assert.ok(html.includes(BRAND_LOGO_DATA));
-assert.ok(html.includes('alt="Procuraflo"'));
+assert.ok(html.includes('alt="ProcuraFlo"'));
 assert.ok(!html.includes('class="footer"'));
 assert.ok(html.includes('border-radius:12px'));
 assert.ok(html.includes('A &amp; B'));
 assert.ok(html.includes('<td>42</td>'));
-console.log('Branding PASS: original logo bytes, three PDF pages, offline spreadsheet logo and data.');
+console.log('Branding PASS: topbar logo bytes, three PDF pages, offline spreadsheet logo and data.');
 
 const printFooter=await readFile('src/components/PrintBrandFooter.jsx','utf8');
 assert.ok(printFooter.includes('counter(page)'));
